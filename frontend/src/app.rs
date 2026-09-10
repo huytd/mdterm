@@ -11,8 +11,9 @@ use crate::tauri_bridge::{self, exec_editor_cmd, fit_terminal_session, window_fi
 #[component]
 pub fn App() -> impl IntoView {
     // 1. Core State
-    let active_filename = RwSignal::new(String::from("Welcome.md"));
-    let active_path = RwSignal::new(Some(String::from("Welcome.md")));
+    let is_editor_open = RwSignal::new(false);
+    let active_filename = RwSignal::new(String::from("Untitled.md"));
+    let active_path = RwSignal::new(None::<String>);
     let active_content = RwSignal::new(WELCOME_MD.to_string());
     let is_dirty = RwSignal::new(false);
     let current_theme = RwSignal::new(Theme::Dark);
@@ -47,6 +48,8 @@ pub fn App() -> impl IntoView {
                     active_filename.set(name);
                     active_path.set(path.clone());
                     is_dirty.set(false);
+                    is_editor_open.set(true);
+                    fit_terminal_session();
 
                     if !content.is_empty() {
                         active_content.set(content);
@@ -104,6 +107,8 @@ pub fn App() -> impl IntoView {
                 active_filename.set(name);
                 active_path.set(Some(path_clone));
                 is_dirty.set(false);
+                is_editor_open.set(true);
+                fit_terminal_session();
             }
         });
     });
@@ -114,6 +119,14 @@ pub fn App() -> impl IntoView {
         active_path.set(None);
         active_content.set("# Untitled Document\n\nStart typing here...".to_string());
         is_dirty.set(false);
+        is_editor_open.set(true);
+        fit_terminal_session();
+    });
+
+    // Close Editor (return to full-screen terminal)
+    let handle_close_editor = Callback::new(move |_| {
+        is_editor_open.set(false);
+        fit_terminal_session();
     });
 
     // Toolbar / Shortcut formatting commands
@@ -304,6 +317,12 @@ pub fn App() -> impl IntoView {
                     ev.prevent_default();
                     find_replace.update(|s| s.is_open = !s.is_open);
                 }
+                "w" => {
+                    if is_editor_open.get() {
+                        ev.prevent_default();
+                        handle_close_editor.run(());
+                    }
+                }
                 _ => {}
             }
         }
@@ -342,6 +361,8 @@ pub fn App() -> impl IntoView {
                 active_filename=active_filename.into()
                 is_dirty=is_dirty.into()
                 current_theme=current_theme
+                is_editor_open=is_editor_open.into()
+                on_close_editor=handle_close_editor
                 on_new_file=handle_new_file
                 on_open_file=Callback::new(move |_| active_modal.set(ActiveModal::OpenFile))
                 on_save_file=Callback::new(move |_| save_active_document())
@@ -351,32 +372,46 @@ pub fn App() -> impl IntoView {
             />
 
             <div class="app-workspace">
-                <div
-                    class="workspace-pane editor-pane"
-                    style=move || format!("width: {}%;", split_ratio.get())
-                >
-                    <WysiwygEditor
-                        content=active_content
-                        on_change=handle_content_change
-                        slash_menu=slash_menu
-                    />
-                </div>
+                {move || if is_editor_open.get() {
+                    view! {
+                        <div
+                            class="workspace-pane editor-pane"
+                            style=move || format!("width: {}%;", split_ratio.get())
+                        >
+                            <WysiwygEditor
+                                content=active_content
+                                on_change=handle_content_change
+                                slash_menu=slash_menu
+                            />
+                        </div>
+
+                        <div
+                            class="workspace-divider"
+                            title="Drag to resize, double-click to reset (50/50)"
+                            on:mousedown=move |_| is_dragging.set(true)
+                            on:dblclick=move |_| {
+                                split_ratio.set(50.0);
+                                fit_terminal_session();
+                            }
+                        >
+                            <div class="divider-line"></div>
+                        </div>
+                    }.into_any()
+                } else {
+                    ().into_any()
+                }}
 
                 <div
-                    class="workspace-divider"
-                    title="Drag to resize, double-click to reset (50/50)"
-                    on:mousedown=move |_| is_dragging.set(true)
-                    on:dblclick=move |_| {
-                        split_ratio.set(50.0);
-                        fit_terminal_session();
+                    class=move || if is_editor_open.get() {
+                        "workspace-pane terminal-pane-container"
+                    } else {
+                        "workspace-pane terminal-pane-container full-width"
                     }
-                >
-                    <div class="divider-line"></div>
-                </div>
-
-                <div
-                    class="workspace-pane terminal-pane-container"
-                    style=move || format!("width: {}%;", 100.0 - split_ratio.get())
+                    style=move || if is_editor_open.get() {
+                        format!("width: {}%;", 100.0 - split_ratio.get())
+                    } else {
+                        "width: 100%;".to_string()
+                    }
                 >
                     <TerminalPane />
                 </div>
@@ -395,6 +430,8 @@ pub fn App() -> impl IntoView {
                     active_path.set(Some(name));
                     active_content.set("# New File\n\n".to_string());
                     is_dirty.set(false);
+                    is_editor_open.set(true);
+                    fit_terminal_session();
                 })
                 on_open_file_confirm=open_file_by_path
                 on_find_next=handle_find_next

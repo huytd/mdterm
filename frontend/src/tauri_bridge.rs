@@ -377,11 +377,22 @@ export function clearTerminalSession() {
 }
 
 export function fitTerminalSession() {
-    if (window._mdtermFitAddon) {
-        try {
-            window._mdtermFitAddon.fit();
-        } catch (e) {}
-    }
+    const doFit = () => {
+        if (window._mdtermFitAddon) {
+            try {
+                window._mdtermFitAddon.fit();
+                if (window._mdtermTerminal && window.__TAURI__) {
+                    const invoke = (window.__TAURI__.core && window.__TAURI__.core.invoke) || (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke);
+                    if (invoke) {
+                        invoke('pty_resize', { cols: window._mdtermTerminal.cols, rows: window._mdtermTerminal.rows }).catch(() => {});
+                    }
+                }
+            } catch (e) {}
+        }
+    };
+    doFit();
+    setTimeout(doFit, 50);
+    setTimeout(doFit, 150);
 }
 "#)]
 extern "C" {
