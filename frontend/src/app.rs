@@ -6,7 +6,10 @@ use crate::components::samples::WELCOME_MD;
 use crate::components::{EditorHeader, FloatingControls, Modals, TerminalPane, WysiwygEditor};
 use crate::markdown::markdown_to_html;
 use crate::state::{ActiveModal, EditorPosition, FindReplaceState, SlashMenuState, Theme};
-use crate::tauri_bridge::{self, exec_editor_cmd, fit_terminal_session, focus_terminal_session, set_terminal_theme, window_find};
+use crate::tauri_bridge::{
+    self, exec_editor_cmd, fit_terminal_session, focus_terminal_session, set_terminal_theme,
+    window_find,
+};
 
 #[component]
 pub fn App() -> impl IntoView {
@@ -20,10 +23,14 @@ pub fn App() -> impl IntoView {
     let is_remote_doc = RwSignal::new(false);
     let current_theme = RwSignal::new(Theme::Dark);
 
-    // Synchronize terminal theme with application theme
+    // Synchronize the terminal and native window chrome with the application theme.
     Effect::new(move |_| {
         let theme = current_theme.get();
-        set_terminal_theme(theme.class_name());
+        let theme_name = theme.class_name();
+        set_terminal_theme(theme_name);
+        leptos::task::spawn_local(async move {
+            let _ = tauri_bridge::set_window_theme(theme_name).await;
+        });
     });
 
     // Split ratio: width percentage of the editor pane (20% - 80%, default 50%)

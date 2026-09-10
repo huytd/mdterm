@@ -796,6 +796,19 @@ pub async fn close_remote_session() {
     let _ = closeRemoteSession().await;
 }
 
+pub async fn set_window_theme(theme: &str) -> Result<(), String> {
+    if !is_tauri_env() {
+        return Ok(());
+    }
+
+    let args = serde_wasm_bindgen::to_value(&json!({ "theme": theme }))
+        .map_err(|e| format!("Failed to serialize args: {:?}", e))?;
+    tauriInvoke("set_window_theme", args)
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("Invoke error: {:?}", e))
+}
+
 pub async fn read_file(path: &str) -> Result<String, String> {
     if is_tauri_env() {
         let args = serde_wasm_bindgen::to_value(&json!({ "path": path }))

@@ -14,7 +14,10 @@
     "windows": [
       {
         "label": "main",
-        "title": "MdTerm - Markdown WYSIWYG Editor",
+        "title": "mdterm",
+        "theme": "Dark",
+        "titleBarStyle": "Transparent",
+        "backgroundColor": "#161b22",
         "width": 1300,
         "height": 860,
         "minWidth": 850,

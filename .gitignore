@@ -2,3 +2,4 @@
 /frontend/dist
 **/*.rs.bk
 .DS_Store
+/frontend/package-lock.json

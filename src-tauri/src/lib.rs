@@ -136,6 +136,35 @@ fn export_document(path: String, content: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn set_window_theme(window: tauri::WebviewWindow, theme: String) -> Result<(), String> {
+    let (native_theme, background_color) = match theme.as_str() {
+        "theme-light" => (
+            tauri::Theme::Light,
+            tauri::window::Color(255, 255, 255, 255),
+        ),
+        "theme-nord" => (
+            tauri::Theme::Dark,
+            tauri::window::Color(59, 66, 82, 255),
+        ),
+        "theme-monokai" => (
+            tauri::Theme::Dark,
+            tauri::window::Color(62, 61, 50, 255),
+        ),
+        _ => (
+            tauri::Theme::Dark,
+            tauri::window::Color(22, 27, 34, 255),
+        ),
+    };
+
+    window
+        .set_theme(Some(native_theme))
+        .map_err(|e| format!("Failed to set window theme: {}", e))?;
+    window
+        .set_background_color(Some(background_color))
+        .map_err(|e| format!("Failed to set window background: {}", e))
+}
+
+#[tauri::command]
 fn get_cli_file() -> Option<String> {
     let args: Vec<String> = std::env::args().collect();
     for arg in args.into_iter().skip(1) {
@@ -319,6 +348,7 @@ pub fn run() {
             delete_file,
             rename_file,
             export_document,
+            set_window_theme,
             pty_spawn,
             pty_get_cwd,
             pty_write,
@@ -328,4 +358,3 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-
