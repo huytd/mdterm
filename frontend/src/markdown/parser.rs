@@ -68,7 +68,45 @@ pub fn markdown_to_html(markdown: &str, is_editable: bool) -> String {
                 // Escape HTML for code content
                 let escaped_code = html_escape::encode_text(&code_block_content).to_string();
 
-                let code_html = if is_editable {
+                let code_html = if display_lang.eq_ignore_ascii_case("mermaid") {
+                    if is_editable {
+                        format!(
+                            "<div class=\"code-block-wrapper mermaid-block-wrapper\" data-lang=\"mermaid\">\
+                                <div class=\"code-block-header\" contenteditable=\"false\">\
+                                    <div class=\"code-lang-tag\">\
+                                        <svg viewBox=\"0 0 24 24\" width=\"13\" height=\"13\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" style=\"margin-right: 5px; vertical-align: -1px;\">\
+                                            <circle cx=\"6\" cy=\"6\" r=\"3\"></circle>\
+                                            <circle cx=\"6\" cy=\"18\" r=\"3\"></circle>\
+                                            <circle cx=\"18\" cy=\"12\" r=\"3\"></circle>\
+                                            <line x1=\"8.5\" y1=\"7.5\" x2=\"15.5\" y2=\"10.5\"></line>\
+                                            <line x1=\"8.5\" y1=\"16.5\" x2=\"15.5\" y2=\"13.5\"></line>\
+                                        </svg>\
+                                        <span>mermaid</span>\
+                                    </div>\
+                                    <div class=\"mermaid-view-switcher\">\
+                                        <button type=\"button\" class=\"mermaid-tab-btn active\" data-tab=\"diagram\" onclick=\"window._toggleMermaidView(this, 'diagram')\">Diagram</button>\
+                                        <button type=\"button\" class=\"mermaid-tab-btn\" data-tab=\"code\" onclick=\"window._toggleMermaidView(this, 'code')\">Code</button>\
+                                    </div>\
+                                    <button type=\"button\" class=\"code-copy-btn\" onclick=\"navigator.clipboard.writeText(this.closest('.code-block-wrapper').querySelector('code').innerText);this.innerText='Copied!';setTimeout(()=>this.innerText='Copy',1500)\">Copy</button>\
+                                </div>\
+                                <!-- MERMAID_PREVIEW_START -->\
+                                <div class=\"mermaid-preview-container\" contenteditable=\"false\">\
+                                    <div class=\"mermaid-preview-target\" data-raw-code=\"{}\">\
+                                        <div class=\"mermaid-loading\">Rendering diagram...</div>\
+                                    </div>\
+                                </div>\
+                                <!-- MERMAID_PREVIEW_END -->\
+                                <pre class=\"mermaid-code-pre\" style=\"display: none;\"><code class=\"language-mermaid\">{}</code></pre>\
+                            </div>",
+                            escaped_code, escaped_code
+                        )
+                    } else {
+                        format!(
+                            "<div class=\"mermaid-export-wrapper\"><div class=\"mermaid\">{}</div></div>",
+                            code_block_content
+                        )
+                    }
+                } else if is_editable {
                     format!(
                         "<div class=\"code-block-wrapper\" data-lang=\"{}\">\
                             <div class=\"code-block-header\" contenteditable=\"false\">\

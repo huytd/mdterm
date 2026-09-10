@@ -51,6 +51,20 @@ fn main() {
 }
 ```
 
+---
+
+## 📊 Interactive Mermaid Diagrams
+
+```mermaid
+graph LR
+    A[Markdown File] -->|Open| B[mdterm Editor]
+    B --> C{View Mode}
+    C -->|WYSIWYG| D[Visual Diagram]
+    C -->|Code Tab| E[Mermaid Source]
+    D --> F[Terminal Split]
+    E --> F
+```
+
 > "Simplicity is prerequisite for reliability."
 > — Edsger W. Dijkstra
 

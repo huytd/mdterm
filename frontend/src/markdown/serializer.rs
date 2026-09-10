@@ -3,7 +3,17 @@ use htmd::HtmlToMarkdown;
 pub fn html_to_markdown(html: &str) -> String {
     let mut clean_html = html.to_string();
 
-    // 1. Remove code block headers (which contain the copy button and language tag)
+    // 0. Remove mermaid preview containers
+    while let Some(start) = clean_html.find("<!-- MERMAID_PREVIEW_START -->") {
+        if let Some(end) = clean_html[start..].find("<!-- MERMAID_PREVIEW_END -->") {
+            let end_idx = start + end + "<!-- MERMAID_PREVIEW_END -->".len();
+            clean_html.replace_range(start..end_idx, "");
+        } else {
+            break;
+        }
+    }
+
+    // 1. Remove code block headers (which contain the copy button, view switcher, and language tag)
     while let Some(start) = clean_html.find("<div class=\"code-block-header\"") {
         if let Some(end) = clean_html[start..].find("</div>") {
             clean_html.replace_range(start..start + end + 6, "");
@@ -40,10 +50,13 @@ pub fn html_to_markdown(html: &str) -> String {
     }
     processed_html.push_str(remainder);
 
-    // 3. Strip table wrapper divs
+    // 3. Strip table and code wrapper divs
     let unwrapped_html = processed_html
         .replace("<div class=\"table-responsive\">", "")
+        .replace("<div class=\"code-block-wrapper mermaid-block-wrapper\" data-lang=\"mermaid\">", "")
         .replace("<div class=\"code-block-wrapper\">", "")
+        .replace("style=\"display: none;\"", "")
+        .replace("class=\"mermaid-code-pre\"", "")
         .replace("</div>", "");
 
     // 4. Convert using htmd
@@ -73,4 +86,23 @@ pub fn html_to_markdown(html: &str) -> String {
     }
 
     final_lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::markdown::markdown_to_html;
+
+    #[test]
+    fn test_mermaid_roundtrip() {
+        let original_md = "```mermaid\ngraph TD\n    A[Start] --> B[End]\n```";
+        let html = markdown_to_html(original_md, true);
+        assert!(html.contains("mermaid-preview-container"));
+        assert!(html.contains("class=\"language-mermaid\""));
+
+        let converted_md = html_to_markdown(&html);
+        assert!(converted_md.contains("```mermaid"));
+        assert!(converted_md.contains("graph TD"));
+        assert!(converted_md.contains("A[Start] --> B[End]"));
+    }
 }

@@ -145,6 +145,94 @@ function getTerminalTheme(name) {
     return TERMINAL_THEMES[clean] || TERMINAL_THEMES.dark;
 }
 
+export function renderMermaidDiagrams() {
+    if (typeof mermaid === 'undefined') return;
+
+    const themeName = (window._mdtermCurrentTheme || 'dark').toLowerCase().replace(/^theme-/, '');
+    const mermaidTheme = themeName === 'light' ? 'default' : (themeName === 'nord' ? 'nord' : 'dark');
+
+    try {
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: mermaidTheme,
+            securityLevel: 'loose',
+            fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+        });
+    } catch (e) {}
+
+    const targets = document.querySelectorAll('.mermaid-preview-target');
+    targets.forEach((target, index) => {
+        const wrapper = target.closest('.mermaid-block-wrapper');
+        const codeEl = wrapper ? wrapper.querySelector('code') : null;
+        const codeText = codeEl ? codeEl.innerText.trim() : (target.getAttribute('data-raw-code') || '');
+
+        if (!codeText) return;
+
+        const id = 'mermaid-svg-' + Date.now() + '-' + index;
+        try {
+            mermaid.render(id, codeText)
+                .then(result => {
+                    target.innerHTML = result.svg;
+                })
+                .catch(err => {
+                    const msg = (err && (err.message || err.str)) || String(err);
+                    target.innerHTML = '<div class="mermaid-error"><div class="mermaid-error-title">⚠️ Mermaid Syntax Error</div><pre class="mermaid-error-msg">' + msg + '</pre></div>';
+                });
+        } catch (syncErr) {
+            const msg = (syncErr && (syncErr.message || syncErr.str)) || String(syncErr);
+            target.innerHTML = '<div class="mermaid-error"><div class="mermaid-error-title">⚠️ Mermaid Syntax Error</div><pre class="mermaid-error-msg">' + msg + '</pre></div>';
+        }
+    });
+}
+
+window._toggleMermaidView = function(btn, mode) {
+    const wrapper = btn.closest('.mermaid-block-wrapper');
+    if (!wrapper) return;
+
+    const preview = wrapper.querySelector('.mermaid-preview-container');
+    const codePre = wrapper.querySelector('.mermaid-code-pre');
+    const tabs = wrapper.querySelectorAll('.mermaid-tab-btn');
+
+    tabs.forEach(t => t.classList.toggle('active', t.getAttribute('data-tab') === mode));
+
+    if (mode === 'code') {
+        if (preview) preview.style.display = 'none';
+        if (codePre) {
+            codePre.style.display = 'block';
+            const codeEl = codePre.querySelector('code');
+            if (codeEl) codeEl.focus();
+        }
+    } else {
+        if (codePre) codePre.style.display = 'none';
+        if (preview) {
+            preview.style.display = 'flex';
+            const target = preview.querySelector('.mermaid-preview-target');
+            const codeEl = wrapper.querySelector('code');
+            if (target && codeEl && typeof mermaid !== 'undefined') {
+                const codeText = codeEl.innerText.trim();
+                const id = 'mermaid-svg-' + Date.now() + '-' + Math.floor(Math.random() * 100000);
+                const themeName = (window._mdtermCurrentTheme || 'dark').toLowerCase().replace(/^theme-/, '');
+                const mermaidTheme = themeName === 'light' ? 'default' : (themeName === 'nord' ? 'nord' : 'dark');
+                try {
+                    mermaid.initialize({ startOnLoad: false, theme: mermaidTheme, securityLevel: 'loose' });
+                } catch (e) {}
+
+                try {
+                    mermaid.render(id, codeText)
+                        .then(res => { target.innerHTML = res.svg; })
+                        .catch(err => {
+                            const msg = (err && (err.message || err.str)) || String(err);
+                            target.innerHTML = '<div class="mermaid-error"><div class="mermaid-error-title">⚠️ Mermaid Syntax Error</div><pre class="mermaid-error-msg">' + msg + '</pre></div>';
+                        });
+                } catch (syncErr) {
+                    const msg = (syncErr && (syncErr.message || syncErr.str)) || String(syncErr);
+                    target.innerHTML = '<div class="mermaid-error"><div class="mermaid-error-title">⚠️ Mermaid Syntax Error</div><pre class="mermaid-error-msg">' + msg + '</pre></div>';
+                }
+            }
+        }
+    }
+};
+
 export function setTerminalTheme(themeName) {
     window._mdtermCurrentTheme = themeName;
     if (window._mdtermTerminal) {
@@ -156,6 +244,9 @@ export function setTerminalTheme(themeName) {
             }
         } catch (e) {}
     }
+    try {
+        renderMermaidDiagrams();
+    } catch (e) {}
 }
 
 export function initTerminalSession(containerId) {
@@ -537,6 +628,9 @@ extern "C" {
 
     #[wasm_bindgen(js_name = setTerminalTheme)]
     pub fn set_terminal_theme(theme_name: &str);
+
+    #[wasm_bindgen(js_name = renderMermaidDiagrams)]
+    pub fn render_mermaid_diagrams();
 
     #[wasm_bindgen(js_name = clearTerminalSession)]
     pub fn clear_terminal_session();

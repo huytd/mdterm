@@ -26,6 +26,7 @@ pub fn WysiwygEditor(
             let rendered_html = markdown_to_html(&md, true);
             let raw_el: &HtmlElement = el.as_ref();
             raw_el.set_inner_html(&rendered_html);
+            crate::tauri_bridge::render_mermaid_diagrams();
         }
     });
 

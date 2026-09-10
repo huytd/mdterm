@@ -189,6 +189,37 @@ pub fn App() -> impl IntoView {
             "code" => {
                 exec_editor_cmd("insertHTML", Some("<pre><code>// code here\n</code></pre><p></p>"));
             }
+            "mermaid" => {
+                let sample_mermaid = "<div class=\"code-block-wrapper mermaid-block-wrapper\" data-lang=\"mermaid\">\
+                    <div class=\"code-block-header\" contenteditable=\"false\">\
+                        <div class=\"code-lang-tag\">\
+                            <svg viewBox=\"0 0 24 24\" width=\"13\" height=\"13\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" style=\"margin-right: 5px; vertical-align: -1px;\">\
+                                <circle cx=\"6\" cy=\"6\" r=\"3\"></circle>\
+                                <circle cx=\"6\" cy=\"18\" r=\"3\"></circle>\
+                                <circle cx=\"18\" cy=\"12\" r=\"3\"></circle>\
+                                <line x1=\"8.5\" y1=\"7.5\" x2=\"15.5\" y2=\"10.5\"></line>\
+                                <line x1=\"8.5\" y1=\"16.5\" x2=\"15.5\" y2=\"13.5\"></line>\
+                            </svg>\
+                            <span>mermaid</span>\
+                        </div>\
+                        <div class=\"mermaid-view-switcher\">\
+                            <button type=\"button\" class=\"mermaid-tab-btn active\" data-tab=\"diagram\" onclick=\"window._toggleMermaidView(this, 'diagram')\">Diagram</button>\
+                            <button type=\"button\" class=\"mermaid-tab-btn\" data-tab=\"code\" onclick=\"window._toggleMermaidView(this, 'code')\">Code</button>\
+                        </div>\
+                        <button type=\"button\" class=\"code-copy-btn\" onclick=\"navigator.clipboard.writeText(this.closest('.code-block-wrapper').querySelector('code').innerText);this.innerText='Copied!';setTimeout(()=>this.innerText='Copy',1500)\">Copy</button>\
+                    </div>\
+                    <!-- MERMAID_PREVIEW_START -->\
+                    <div class=\"mermaid-preview-container\" contenteditable=\"false\">\
+                        <div class=\"mermaid-preview-target\">\
+                            <div class=\"mermaid-loading\">Rendering diagram...</div>\
+                        </div>\
+                    </div>\
+                    <!-- MERMAID_PREVIEW_END -->\
+                    <pre class=\"mermaid-code-pre\" style=\"display: none;\"><code class=\"language-mermaid\">graph TD\n    A[Start] --&gt; B{Decision}\n    B --&gt;|Yes| C[Result 1]\n    B --&gt;|No| D[Result 2]</code></pre>\
+                </div><p></p>";
+                exec_editor_cmd("insertHTML", Some(sample_mermaid));
+                tauri_bridge::render_mermaid_diagrams();
+            }
             "table" => {
                 handle_insert_table_confirm.run((3, 3));
             }
@@ -227,7 +258,12 @@ pub fn App() -> impl IntoView {
     th {{ background: #f8fafc; font-weight: 600; }}
     .task-list {{ list-style-type: none; padding-left: 0; }}
     img {{ max-width: 100%; height: auto; border-radius: 6px; }}
+    .mermaid {{ display: flex; justify-content: center; margin: 24px 0; background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid #e2e8f0; }}
   </style>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({{ startOnLoad: true }});
+  </script>
 </head>
 <body>
 {}

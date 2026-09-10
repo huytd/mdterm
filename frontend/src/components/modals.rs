@@ -189,6 +189,13 @@ pub fn Modals(
                                     <span class="slash-desc">"Preformatted code container"</span>
                                 </div>
                             </div>
+                            <div class="slash-item" on:click=move |_| on_slash_select.run("mermaid")>
+                                <span class="slash-icon">"📊"</span>
+                                <div class="slash-info">
+                                    <span class="slash-title">"Mermaid Diagram"</span>
+                                    <span class="slash-desc">"Flowcharts, sequences, state diagrams"</span>
+                                </div>
+                            </div>
                             <div class="slash-item" on:click=move |_| on_slash_select.run("table")>
                                 <span class="slash-icon">"▦"</span>
                                 <div class="slash-info">
