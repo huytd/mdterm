@@ -223,6 +223,31 @@ When editing, `Ctrl + S` in the editor saves directly back to the remote server,
 
 ---
 
+## ⚙️ Configuration
+
+`mdterm` can be configured via a YAML file located at `$HOME/.config/mdterm/config.yml`.
+
+If the file does not exist, `mdterm` creates a commented default configuration automatically upon startup. Changes to `config.yml` are automatically watched and reloaded live without needing to restart the application.
+
+```yaml
+# ~/.config/mdterm/config.yml
+
+# Terminal theme: "dark", "light", "nord", "monokai"
+# (You can also provide custom color mappings)
+theme: "dark"
+
+# Font family for the terminal
+font_family: 'JetBrains Mono, Menlo, Monaco, Consolas, "Courier New", monospace'
+
+# Font size in points/pixels
+font_size: 13
+
+# Character height / line height multiplier (e.g. 1.0, 1.25, 1.5)
+character_height: 1.25
+```
+
+---
+
 ## ⌨️ Keyboard Shortcuts Cheatsheet
 
 | Shortcut | Action |

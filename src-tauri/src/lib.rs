@@ -6,6 +6,8 @@ use std::sync::Mutex;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
+pub mod config;
+
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
@@ -323,6 +325,18 @@ fn pty_resize(state: State<PtyState>, cols: u16, rows: u16) -> Result<(), String
     }
 }
 
+#[tauri::command]
+fn get_terminal_config() -> Result<config::TerminalConfig, String> {
+    Ok(config::load_terminal_config())
+}
+
+#[tauri::command]
+fn get_config_path() -> Result<String, String> {
+    config::get_config_path()
+        .map(|p| p.to_string_lossy().to_string())
+        .ok_or_else(|| "Could not determine config path".to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -336,6 +350,28 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();
             }
+
+            // Ensure config exists and watch for modifications
+            let _ = config::ensure_default_config_exists();
+            let app_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let config_path = match config::get_config_path() {
+                    Some(p) => p,
+                    None => return,
+                };
+                let mut last_modified = fs::metadata(&config_path).and_then(|m| m.modified()).ok();
+
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(1000));
+                    let current_modified = fs::metadata(&config_path).and_then(|m| m.modified()).ok();
+                    if current_modified != last_modified && current_modified.is_some() {
+                        last_modified = current_modified;
+                        let cfg = config::load_terminal_config();
+                        let _ = app_handle.emit("terminal-config-changed", &cfg);
+                    }
+                }
+            });
+
             Ok(())
         })
         .manage(PtyState::default())
@@ -354,7 +390,9 @@ pub fn run() {
             pty_get_cwd,
             pty_write,
             pty_resize,
-            get_cli_file
+            get_cli_file,
+            get_terminal_config,
+            get_config_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

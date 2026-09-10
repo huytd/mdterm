@@ -52,6 +52,45 @@ pub fn App() -> impl IntoView {
         });
     });
 
+    // Load terminal config from ~/.config/mdterm/config.yml on app start
+    leptos::task::spawn_local(async move {
+        if let Ok(cfg) = tauri_bridge::get_terminal_config().await {
+            tauri_bridge::apply_terminal_config(&cfg);
+            if let Some(theme_val) = &cfg.theme {
+                if let tauri_bridge::ThemeValue::Name(ref name) = theme_val {
+                    if let Some(t) = Theme::from_name_or_class(name) {
+                        current_theme.set(t);
+                    }
+                }
+            }
+        }
+    });
+
+    // Listen for live config changes emitted by background watcher
+    Effect::new(move |_| {
+        if let Some(win) = web_sys::window() {
+            let cb = wasm_bindgen::closure::Closure::wrap(Box::new(move |ev: web_sys::CustomEvent| {
+                if let Ok(detail) = js_sys::Reflect::get(&ev, &"detail".into()) {
+                    if let Ok(cfg) = serde_wasm_bindgen::from_value::<tauri_bridge::TerminalConfig>(detail) {
+                        if let Some(theme_val) = &cfg.theme {
+                            if let tauri_bridge::ThemeValue::Name(ref name) = theme_val {
+                                if let Some(t) = Theme::from_name_or_class(name) {
+                                    current_theme.set(t);
+                                }
+                            }
+                        }
+                    }
+                }
+            }) as Box<dyn FnMut(_)>);
+
+            let _ = win.add_event_listener_with_callback(
+                "mdterm-config-changed",
+                cb.as_ref().unchecked_ref(),
+            );
+            cb.forget();
+        }
+    });
+
     // Split ratio: width percentage of the editor pane (20% - 80%, default 50%)
     let split_ratio = RwSignal::new(50.0f64);
     let is_dragging = RwSignal::new(false);

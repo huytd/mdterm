@@ -55,6 +55,18 @@ impl Theme {
         }
     }
 
+    pub fn from_name_or_class(name: &str) -> Option<Self> {
+        let clean = name.to_lowercase();
+        let clean = clean.trim().strip_prefix("theme-").unwrap_or(&clean);
+        match clean {
+            "dark" => Some(Theme::Dark),
+            "light" => Some(Theme::Light),
+            "nord" => Some(Theme::Nord),
+            "monokai" => Some(Theme::Monokai),
+            _ => None,
+        }
+    }
+
     pub fn next(&self) -> Theme {
         match self {
             Theme::Dark => Theme::Light,
@@ -74,6 +86,18 @@ mod theme_tests {
         for theme in [Theme::Dark, Theme::Light, Theme::Nord, Theme::Monokai] {
             assert_eq!(Theme::from_class_name(theme.class_name()), Some(theme));
         }
+    }
+
+    #[test]
+    fn theme_from_name_or_class() {
+        assert_eq!(Theme::from_name_or_class("dark"), Some(Theme::Dark));
+        assert_eq!(Theme::from_name_or_class("THEME-DARK"), Some(Theme::Dark));
+        assert_eq!(Theme::from_name_or_class("nord"), Some(Theme::Nord));
+        assert_eq!(Theme::from_name_or_class("theme-nord"), Some(Theme::Nord));
+        assert_eq!(Theme::from_name_or_class("Nord"), Some(Theme::Nord));
+        assert_eq!(Theme::from_name_or_class("monokai"), Some(Theme::Monokai));
+        assert_eq!(Theme::from_name_or_class("light"), Some(Theme::Light));
+        assert_eq!(Theme::from_name_or_class("other"), None);
     }
 
     #[test]

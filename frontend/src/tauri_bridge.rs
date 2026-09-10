@@ -1,5 +1,6 @@
 use wasm_bindgen::prelude::*;
 use crate::state::FileEntry;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 #[wasm_bindgen(inline_js = r#"
@@ -284,8 +285,13 @@ window._toggleMermaidView = function(btn, mode) {
 
 export function setTerminalTheme(themeName) {
     window._mdtermCurrentTheme = themeName;
+    let theme;
+    if (typeof themeName === 'object' && themeName !== null) {
+        theme = Object.assign({}, TERMINAL_THEMES.dark, themeName);
+    } else {
+        theme = getTerminalTheme(themeName);
+    }
     if (window._mdtermTerminal) {
-        const theme = getTerminalTheme(themeName);
         window._mdtermTerminal.options.theme = theme;
         try {
             if (typeof window._mdtermTerminal.refresh === 'function') {
@@ -293,9 +299,54 @@ export function setTerminalTheme(themeName) {
             }
         } catch (e) {}
     }
+    const container = document.getElementById('mdterm-xterm-container');
+    if (container && theme && theme.background) {
+        container.style.backgroundColor = theme.background;
+    }
     try {
         renderMermaidDiagrams();
     } catch (e) {}
+}
+
+export function applyTerminalConfig(cfg) {
+    if (!cfg) return;
+    window._mdtermTerminalConfig = cfg;
+    if (cfg.theme) {
+        setTerminalTheme(cfg.theme);
+    }
+    if (window._mdtermTerminal) {
+        if (cfg.font_family || cfg.fontFamily) {
+            window._mdtermTerminal.options.fontFamily = cfg.font_family || cfg.fontFamily;
+        }
+        if (cfg.font_size || cfg.fontSize) {
+            const parsed = Number(cfg.font_size || cfg.fontSize);
+            if (!isNaN(parsed) && parsed > 0) {
+                window._mdtermTerminal.options.fontSize = parsed;
+            }
+        }
+        const rawHeight = cfg.character_height || cfg.characterHeight || cfg.line_height || cfg.lineHeight;
+        if (rawHeight !== undefined && rawHeight !== null) {
+            let ch = Number(rawHeight);
+            if (!isNaN(ch) && ch > 0) {
+                if (ch > 5.0) {
+                    const currentFontSize = window._mdtermTerminal.options.fontSize || 13;
+                    ch = ch / currentFontSize;
+                }
+                window._mdtermTerminal.options.lineHeight = Math.max(1.0, ch);
+            }
+        }
+        if (window._mdtermFitAddon) {
+            try {
+                window._mdtermFitAddon.fit();
+                if (window.__TAURI__) {
+                    const invoke = (window.__TAURI__.core && window.__TAURI__.core.invoke) || (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke);
+                    if (invoke) {
+                        invoke('pty_resize', { cols: window._mdtermTerminal.cols, rows: window._mdtermTerminal.rows }).catch(() => {});
+                    }
+                }
+            } catch (e) {}
+        }
+    }
 }
 
 export function initTerminalSession(containerId) {
@@ -319,13 +370,45 @@ export function initTerminalSession(containerId) {
         return;
     }
 
-    const initialTheme = getTerminalTheme(window._mdtermCurrentTheme || 'dark');
+    const cfg = window._mdtermTerminalConfig || {};
+    let fontSize = 13;
+    if (cfg.font_size || cfg.fontSize) {
+        const parsed = Number(cfg.font_size || cfg.fontSize);
+        if (!isNaN(parsed) && parsed > 0) fontSize = parsed;
+    }
+    let fontFamily = 'JetBrains Mono, Menlo, Monaco, Consolas, "Courier New", monospace';
+    if (cfg.font_family || cfg.fontFamily) {
+        fontFamily = cfg.font_family || cfg.fontFamily;
+    }
+    let lineHeight = 1.25;
+    const rawHeight = cfg.character_height || cfg.characterHeight || cfg.line_height || cfg.lineHeight;
+    if (rawHeight !== undefined && rawHeight !== null) {
+        let ch = Number(rawHeight);
+        if (!isNaN(ch) && ch > 0) {
+            if (ch > 5.0) {
+                ch = ch / fontSize;
+            }
+            lineHeight = Math.max(1.0, ch);
+        }
+    }
+    let initialTheme;
+    if (cfg.theme) {
+        if (typeof cfg.theme === 'object' && cfg.theme !== null) {
+            initialTheme = Object.assign({}, TERMINAL_THEMES.dark, cfg.theme);
+        } else {
+            initialTheme = getTerminalTheme(cfg.theme);
+            window._mdtermCurrentTheme = cfg.theme;
+        }
+    } else {
+        initialTheme = getTerminalTheme(window._mdtermCurrentTheme || 'dark');
+    }
+
     const term = new Terminal({
         cursorBlink: true,
         cursorStyle: 'block',
-        fontSize: 13,
-        lineHeight: 1.25,
-        fontFamily: 'JetBrains Mono, Menlo, Monaco, Consolas, "Courier New", monospace',
+        fontSize: fontSize,
+        lineHeight: lineHeight,
+        fontFamily: fontFamily,
         theme: initialTheme,
         convertEol: true,
         allowTransparency: false
@@ -702,9 +785,23 @@ export function initTerminalSession(containerId) {
             term.write('\r\n\x1b[31mFailed to spawn shell: ' + err + '\x1b[0m\r\n');
         });
 
+        invoke('get_terminal_config').then(loadedCfg => {
+            if (loadedCfg) {
+                applyTerminalConfig(loadedCfg);
+            }
+        }).catch(err => {
+            console.error('Failed to get terminal config:', err);
+        });
+
         if (event && typeof event.listen === 'function') {
             event.listen('pty-output', (e) => {
                 term.write(e.payload);
+            });
+            event.listen('terminal-config-changed', (e) => {
+                if (e.payload) {
+                    applyTerminalConfig(e.payload);
+                    window.dispatchEvent(new CustomEvent('mdterm-config-changed', { detail: e.payload }));
+                }
             });
         }
 
@@ -767,7 +864,9 @@ export function initTerminalSession(containerId) {
 
     window._mdtermTerminal = term;
     window._mdtermFitAddon = fitAddon;
-    if (window._mdtermCurrentTheme) {
+    if (window._mdtermTerminalConfig) {
+        applyTerminalConfig(window._mdtermTerminalConfig);
+    } else if (window._mdtermCurrentTheme) {
         setTerminalTheme(window._mdtermCurrentTheme);
     }
 }
@@ -838,6 +937,9 @@ extern "C" {
     #[wasm_bindgen(js_name = setTerminalTheme)]
     pub fn set_terminal_theme(theme_name: &str);
 
+    #[wasm_bindgen(js_name = applyTerminalConfig)]
+    pub fn apply_terminal_config_js(config: wasm_bindgen::JsValue);
+
     #[wasm_bindgen(js_name = renderMermaidDiagrams)]
     pub fn render_mermaid_diagrams();
 
@@ -886,6 +988,61 @@ pub async fn set_window_theme(theme: &str) -> Result<(), String> {
         .map(|_| ())
         .map_err(|e| format!("Invoke error: {:?}", e))
 }
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ThemeValue {
+    Name(String),
+    Custom(serde_json::Value),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+pub struct TerminalConfig {
+    #[serde(default)]
+    pub theme: Option<ThemeValue>,
+    #[serde(default)]
+    pub font_family: Option<String>,
+    #[serde(default)]
+    pub font_size: Option<f64>,
+    #[serde(default)]
+    pub character_height: Option<f64>,
+}
+
+pub fn apply_terminal_config(config: &TerminalConfig) {
+    if let Ok(val) = serde_wasm_bindgen::to_value(config) {
+        apply_terminal_config_js(val);
+    }
+}
+
+pub async fn get_terminal_config() -> Result<TerminalConfig, String> {
+    if is_tauri_env() {
+        let args = serde_wasm_bindgen::to_value(&json!({}))
+            .map_err(|e| format!("Failed to serialize args: {:?}", e))?;
+        let res = tauriInvoke("get_terminal_config", args)
+            .await
+            .map_err(|e| format!("Invoke error: {:?}", e))?;
+        serde_wasm_bindgen::from_value(res)
+            .map_err(|e| format!("Failed to parse response: {:?}", e))
+    } else {
+        Ok(TerminalConfig::default())
+    }
+}
+
+#[allow(dead_code)]
+pub async fn get_config_path() -> Result<String, String> {
+    if is_tauri_env() {
+        let args = serde_wasm_bindgen::to_value(&json!({}))
+            .map_err(|e| format!("Failed to serialize args: {:?}", e))?;
+        let res = tauriInvoke("get_config_path", args)
+            .await
+            .map_err(|e| format!("Invoke error: {:?}", e))?;
+        serde_wasm_bindgen::from_value(res)
+            .map_err(|e| format!("Failed to parse response: {:?}", e))
+    } else {
+        Ok("~/.config/mdterm/config.yml".to_string())
+    }
+}
+
 
 pub async fn read_file(path: &str) -> Result<String, String> {
     if is_tauri_env() {
