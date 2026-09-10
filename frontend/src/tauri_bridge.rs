@@ -713,8 +713,12 @@ export function initTerminalSession(containerId) {
         } else {
             // Browser preview mode
             showToast("Opened '" + filename + "' (" + side + ")");
+            const isHtml = /\.(html|htm|xhtml)$/i.test(filename);
+            const sampleContent = isHtml
+                ? `<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="utf-8" />\n  <title>${filename}</title>\n</head>\n<body>\n  <h1>${filename}</h1>\n  <p>Opened via terminal click.</p>\n</body>\n</html>`
+                : '# ' + filename + '\n\nOpened via terminal click.';
             window.dispatchEvent(new CustomEvent('mdterm-open-file', {
-                detail: { name: filename, path: cleanPath, content: '# ' + filename + '\n\nOpened via terminal click.', side }
+                detail: { name: filename, path: cleanPath, content: sampleContent, side }
             }));
         }
     };
@@ -733,7 +737,7 @@ export function initTerminalSession(containerId) {
     }
 
     // Register Link Provider in xterm.js for files (like from `ls` output)
-    const fileLinkRegex = /(?:^|[\s"'\(\)\[\]<>{},;:`])((?:(?:\.|\.\.|\~)?\/)?(?:[\w.-]+\/)*[\w.-]+\.(?:md|markdown|mdown|mkd|txt|rst|org|html|toml|json|yaml|yml|sh|rs|js|ts|css|py|c|cpp|h|go))(?:[\s"'\(\)\[\]<>{},;:`]|$)/gi;
+    const fileLinkRegex = /(?:^|[\s"'\(\)\[\]<>{},;:`])((?:(?:\.|\.\.|\~)?\/)?(?:[\w.-]+\/)*[\w.-]+\.(?:md|markdown|mdown|mkd|txt|rst|org|html|htm|xhtml|toml|json|yaml|yml|sh|rs|js|ts|css|py|c|cpp|h|go))(?:[\s"'\(\)\[\]<>{},;:`]|$)/gi;
 
     if (typeof term.registerLinkProvider === 'function') {
         term.registerLinkProvider({
@@ -834,8 +838,12 @@ export function initTerminalSession(containerId) {
                     term.clear();
                 } else if (buf.trim().startsWith('mdterm ')) {
                     const fname = buf.trim().slice(7).trim();
+                    const isHtml = /\.(html|htm|xhtml)$/i.test(fname);
+                    const sampleContent = isHtml
+                        ? `<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="utf-8" />\n  <title>${fname}</title>\n</head>\n<body>\n  <h1>${fname}</h1>\n  <p>Opened via terminal in mdterm editor.</p>\n</body>\n</html>`
+                        : '# ' + fname + '\n\nOpened via terminal in mdterm editor.';
                     window.dispatchEvent(new CustomEvent('mdterm-open-file', {
-                        detail: { name: fname, path: fname, content: '# ' + fname + '\n\nOpened via terminal in mdterm editor.' }
+                        detail: { name: fname, path: fname, content: sampleContent }
                     }));
                     term.write('\x1b[32m✓ Opened \'' + fname + '\' in mdterm editor\x1b[0m\r\n');
                 } else if (buf.trim().length > 0) {
@@ -1059,6 +1067,9 @@ pub async fn read_file(path: &str) -> Result<String, String> {
                 if let Ok(Some(saved)) = storage.get_item(&format!("mdterm_file_{}", path)) {
                     return Ok(saved);
                 }
+                if path == "index.html" || path.ends_with(".html") || path.ends_with(".htm") {
+                    return Ok(crate::components::samples::SAMPLE_HTML.to_string());
+                }
             }
         }
         Err(format!("File '{}' not found in storage", path))
@@ -1100,6 +1111,12 @@ pub async fn read_dir(path: &str) -> Result<Vec<FileEntry>, String> {
                 path: "Welcome.md".to_string(),
                 is_dir: false,
                 size: 2400,
+            },
+            FileEntry {
+                name: "index.html".to_string(),
+                path: "index.html".to_string(),
+                is_dir: false,
+                size: 1800,
             },
             FileEntry {
                 name: "Syntax-Guide.md".to_string(),

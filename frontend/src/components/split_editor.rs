@@ -2,18 +2,31 @@ use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::MouseEvent;
 use crate::components::source_editor::SourceEditor;
+use crate::html::HtmlEnvelope;
 use crate::markdown::markdown_to_html;
 
 #[component]
 pub fn SplitEditor(
     content: RwSignal<String>,
+    #[prop(optional)] is_html: Option<Signal<bool>>,
     on_change: Callback<String>,
 ) -> impl IntoView {
+    let is_html_sig = is_html.unwrap_or_else(|| Signal::derive(|| false));
     let preview_ref = NodeRef::<leptos::html::Div>::new();
 
     let rendered_html = Memo::new(move |_| {
-        let md = content.get();
-        markdown_to_html(&md, false)
+        let text = content.get();
+        if is_html_sig.get() {
+            let env = HtmlEnvelope::parse(&text);
+            env.render_preview()
+        } else {
+            markdown_to_html(&text, false)
+        }
+    });
+
+    Effect::new(move |_| {
+        let _ = rendered_html.get();
+        crate::tauri_bridge::render_mermaid_diagrams();
     });
 
     let handle_preview_click = move |ev: MouseEvent| {
@@ -67,7 +80,7 @@ pub fn SplitEditor(
     view! {
         <div class="split-editor-container">
             <div class="split-pane split-left">
-                <SourceEditor content=content on_change=on_change />
+                <SourceEditor content=content is_html=is_html_sig on_change=on_change />
             </div>
 
             <div class="split-divider"></div>

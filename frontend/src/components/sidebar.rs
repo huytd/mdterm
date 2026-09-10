@@ -157,6 +157,14 @@ pub fn Sidebar(
                                         <span class="tpl-icon">"📖"</span>
                                         <span>"Markdown Syntax Guide"</span>
                                     </button>
+                                    <button
+                                        type="button"
+                                        class="template-item-btn"
+                                        on:click=move |_| on_load_template.run("html")
+                                    >
+                                        <span class="tpl-icon">"🌐"</span>
+                                        <span>"HTML Document Sample"</span>
+                                    </button>
                                 </div>
                             </div>
                         </div>

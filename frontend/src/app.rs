@@ -3,9 +3,12 @@ use wasm_bindgen::JsCast;
 use web_sys::{KeyboardEvent, MouseEvent};
 
 use crate::components::samples::WELCOME_MD;
-use crate::components::{EditorHeader, FloatingControls, Modals, TerminalPane, WysiwygEditor};
-use crate::markdown::markdown_to_html;
-use crate::state::{ActiveModal, EditorPosition, FindReplaceState, SlashMenuState, Theme};
+use crate::components::{
+    EditorHeader, FloatingControls, Modals, SourceEditor, SplitEditor, TerminalPane, WysiwygEditor,
+};
+use crate::html::{self, HtmlEnvelope};
+use crate::markdown::{html_to_markdown, markdown_to_html};
+use crate::state::{ActiveModal, EditorMode, EditorPosition, FindReplaceState, SlashMenuState, Theme};
 use crate::tauri_bridge::{
     self, exec_editor_cmd, fit_terminal_session, focus_terminal_session, set_terminal_theme,
     window_find,
@@ -34,12 +37,17 @@ pub fn App() -> impl IntoView {
     // 1. Core State
     let is_editor_open = RwSignal::new(false);
     let editor_position = RwSignal::new(EditorPosition::Right);
+    let active_mode = RwSignal::new(EditorMode::Wysiwyg);
     let active_filename = RwSignal::new(String::from("Untitled.md"));
     let active_path = RwSignal::new(None::<String>);
     let active_content = RwSignal::new(WELCOME_MD.to_string());
     let is_dirty = RwSignal::new(false);
     let is_remote_doc = RwSignal::new(false);
     let current_theme = RwSignal::new(load_persisted_theme());
+
+    let is_html_doc = Memo::new(move |_| {
+        html::is_html_file(&active_filename.get(), &active_content.get())
+    });
 
     // Persist and synchronize the terminal and native window chrome with the app theme.
     Effect::new(move |_| {
@@ -365,15 +373,26 @@ pub fn App() -> impl IntoView {
 
     // Export confirmation
     let handle_export_confirm = Callback::new(move |format_choice: &'static str| {
-        let md = active_content.get();
+        let current_text = active_content.get();
         let base_name = active_filename.get();
-        let clean_name = base_name.trim_end_matches(".md");
+        let is_html = is_html_doc.get();
+        let clean_name = base_name
+            .strip_suffix(".html")
+            .or_else(|| base_name.strip_suffix(".htm"))
+            .or_else(|| base_name.strip_suffix(".xhtml"))
+            .or_else(|| base_name.strip_suffix(".md"))
+            .or_else(|| base_name.strip_suffix(".markdown"))
+            .unwrap_or(&base_name);
 
         match format_choice {
             "html" => {
-                let body_html = markdown_to_html(&md, false);
-                let standalone_html = format!(
-                    r#"<!DOCTYPE html>
+                let standalone_html = if is_html {
+                    let env = HtmlEnvelope::parse(&current_text);
+                    env.ensure_full_document(clean_name)
+                } else {
+                    let body_html = markdown_to_html(&current_text, false);
+                    format!(
+                        r#"<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -402,15 +421,21 @@ pub fn App() -> impl IntoView {
 {}
 </body>
 </html>"#,
-                    clean_name, body_html
-                );
+                        clean_name, body_html
+                    )
+                };
                 tauri_bridge::triggerDownload(&format!("{}.html", clean_name), &standalone_html, "text/html");
             }
             "print" => {
                 tauri_bridge::openPrintDialog();
             }
             _ => {
-                tauri_bridge::triggerDownload(&format!("{}.md", clean_name), &md, "text/markdown");
+                let md_content = if is_html {
+                    html_to_markdown(&current_text)
+                } else {
+                    current_text
+                };
+                tauri_bridge::triggerDownload(&format!("{}.md", clean_name), &md_content, "text/markdown");
             }
         }
     });
@@ -493,6 +518,14 @@ pub fn App() -> impl IntoView {
                     ev.prevent_default();
                     current_theme.update(|t| *t = t.next());
                 }
+                "m" => {
+                    ev.prevent_default();
+                    active_mode.update(|m| *m = match *m {
+                        EditorMode::Wysiwyg => EditorMode::Split,
+                        EditorMode::Split => EditorMode::Source,
+                        EditorMode::Source => EditorMode::Wysiwyg,
+                    });
+                }
                 _ => {}
             }
         }
@@ -548,6 +581,8 @@ pub fn App() -> impl IntoView {
                                 active_filename=active_filename.into()
                                 is_dirty=is_dirty.into()
                                 is_remote=is_remote_doc.into()
+                                is_html=is_html_doc.into()
+                                active_mode=active_mode
                                 current_theme=current_theme
                                 editor_position=editor_position
                                 on_close_editor=handle_close_editor
@@ -555,11 +590,30 @@ pub fn App() -> impl IntoView {
                                 on_export=Callback::new(move |_| active_modal.set(ActiveModal::Export))
                             />
 
-                            <WysiwygEditor
-                                content=active_content
-                                on_change=handle_content_change
-                                slash_menu=slash_menu
-                            />
+                            {move || match active_mode.get() {
+                                EditorMode::Wysiwyg => view! {
+                                    <WysiwygEditor
+                                        content=active_content
+                                        is_html=is_html_doc.into()
+                                        on_change=handle_content_change
+                                        slash_menu=slash_menu
+                                    />
+                                }.into_any(),
+                                EditorMode::Split => view! {
+                                    <SplitEditor
+                                        content=active_content
+                                        is_html=is_html_doc.into()
+                                        on_change=handle_content_change
+                                    />
+                                }.into_any(),
+                                EditorMode::Source => view! {
+                                    <SourceEditor
+                                        content=active_content
+                                        is_html=is_html_doc.into()
+                                        on_change=handle_content_change
+                                    />
+                                }.into_any(),
+                            }}
                         </div>
 
                         <div
@@ -612,9 +666,33 @@ pub fn App() -> impl IntoView {
                 on_insert_table_confirm=handle_insert_table_confirm
                 on_export_confirm=handle_export_confirm
                 on_new_file_confirm=Callback::new(move |name: String| {
+                    let is_html = html::is_html_file(&name, "");
                     active_filename.set(name.clone());
-                    active_path.set(Some(name));
-                    active_content.set("# New File\n\n".to_string());
+                    active_path.set(Some(name.clone()));
+                    if is_html {
+                        let clean = name
+                            .strip_suffix(".html")
+                            .or_else(|| name.strip_suffix(".htm"))
+                            .or_else(|| name.strip_suffix(".xhtml"))
+                            .unwrap_or(&name);
+                        active_content.set(format!(
+                            r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{}</title>
+</head>
+<body>
+  <h1>{}</h1>
+  <p>Start typing here...</p>
+</body>
+</html>"#,
+                            clean, clean
+                        ));
+                    } else {
+                        active_content.set("# New File\n\n".to_string());
+                    }
                     is_dirty.set(false);
                     is_remote_doc.set(false);
                     is_editor_open.set(true);

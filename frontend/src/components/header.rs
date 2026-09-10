@@ -1,17 +1,21 @@
 use leptos::prelude::*;
-use crate::state::{EditorPosition, Theme};
+use crate::state::{EditorMode, EditorPosition, Theme};
 
 #[component]
 pub fn EditorHeader(
     active_filename: Signal<String>,
     is_dirty: Signal<bool>,
     is_remote: Signal<bool>,
+    #[prop(optional)] is_html: Option<Signal<bool>>,
+    active_mode: RwSignal<EditorMode>,
     current_theme: RwSignal<Theme>,
     editor_position: RwSignal<EditorPosition>,
     on_close_editor: Callback<()>,
     on_save_file: Callback<()>,
     on_export: Callback<()>,
 ) -> impl IntoView {
+    let is_html_sig = is_html.unwrap_or_else(|| Signal::derive(|| false));
+
     view! {
         <div class="editor-tab-bar">
             <div class="tab-title">
@@ -20,6 +24,11 @@ pub fn EditorHeader(
                     <polyline points="14 2 14 8 20 8"></polyline>
                 </svg>
                 <span class="tab-filename">{move || active_filename.get()}</span>
+                {move || if is_html_sig.get() {
+                    view! { <span class="tab-format-tag html-tag" title="HTML Document">"HTML"</span> }.into_any()
+                } else {
+                    view! { <span class="tab-format-tag md-tag" title="Markdown Document">"MD"</span> }.into_any()
+                }}
                 {move || if is_remote.get() {
                     view! { <span class="tab-remote-tag" title="Connected to remote SSH session">"SSH"</span> }.into_any()
                 } else {
@@ -30,6 +39,45 @@ pub fn EditorHeader(
                 } else {
                     ().into_any()
                 }}
+            </div>
+
+            <div class="mode-switch-group">
+                <button
+                    type="button"
+                    class=move || if active_mode.get() == EditorMode::Wysiwyg { "mode-btn active" } else { "mode-btn" }
+                    title="Visual WYSIWYG Mode"
+                    on:click=move |_| active_mode.set(EditorMode::Wysiwyg)
+                >
+                    <svg class="mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                    <span>"Visual"</span>
+                </button>
+                <button
+                    type="button"
+                    class=move || if active_mode.get() == EditorMode::Split { "mode-btn active" } else { "mode-btn" }
+                    title="Split Source & Preview Mode"
+                    on:click=move |_| active_mode.set(EditorMode::Split)
+                >
+                    <svg class="mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                        <line x1="12" y1="3" x2="12" y2="21"></line>
+                    </svg>
+                    <span>"Split"</span>
+                </button>
+                <button
+                    type="button"
+                    class=move || if active_mode.get() == EditorMode::Source { "mode-btn active" } else { "mode-btn" }
+                    title="Raw Source Code Mode"
+                    on:click=move |_| active_mode.set(EditorMode::Source)
+                >
+                    <svg class="mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="16 18 22 12 16 6"></polyline>
+                        <polyline points="8 6 2 12 8 18"></polyline>
+                    </svg>
+                    <span>"Source"</span>
+                </button>
             </div>
 
             <div class="tab-actions">

@@ -6,18 +6,23 @@ A native, high-performance **Markdown WYSIWYG Editor** desktop application built
 
 ## 🌟 Key Features
 
+* **First-Class HTML Document Support**: Open, visually edit, and save full HTML documents (`.html`, `.htm`, `.xhtml`) as well as HTML fragments.
+  * **Envelope Preservation**: Preserves `<!DOCTYPE html>`, `<html...>`, `<head>...</head>` (meta tags, `<title>`, stylesheets, scripts), and `<body...>` attributes intact when editing and saving.
+  * **No Markdown Mangling**: HTML files are edited and saved purely as HTML—never converted to or overwritten by Markdown syntax.
+  * **Format Badge**: Editor header automatically detects and indicates document type (`HTML` vs `MD`).
 * **True WYSIWYG Visual Editing**: Write, format, and interact with your documents visually in real-time. Headings, bold, italic, code, quotes, tables, and task lists render inline.
 * **Triple Editing Modes**:
-  * **WYSIWYG Mode**: Rich visual document editing surface with instant markdown synchronization.
-  * **Split Mode**: Synchronized side-by-side view (raw Markdown editor on left, live GFM preview on right).
-  * **Source Mode**: Focused raw Markdown text editor with line numbers gutter and code editing hotkeys.
+  * **Visual (WYSIWYG) Mode**: Rich visual document editing surface with instant document synchronization.
+  * **Split Mode**: Synchronized side-by-side view (raw source on left, live rendered preview on right for both Markdown and HTML).
+  * **Source Mode**: Focused raw source text editor with line numbers gutter, syntax formatting, and hotkeys.
+  * **Quick Mode Cycling**: Use `Ctrl + M` or the header mode switch buttons to effortlessly toggle between Visual, Split, and Source views.
 * **Interactive Task Checklists**: Click `- [ ]` / `- [x]` checkboxes directly in WYSIWYG or preview to toggle tasks.
-* **Inline Markdown Triggers**: Typing `# `, `## `, `- `, `* `, `1. `, `[] `, `> `, or ` ``` ` automatically transforms blocks into semantic elements on the fly.
+* **Inline Markdown & HTML Triggers**: Typing `# `, `## `, `- `, `* `, `1. `, `[] `, `> `, or ` ``` ` automatically transforms blocks into semantic elements on the fly.
 * **Slash Command Menu**: Press `/` on any line to open a floating block insertion menu (Headings, Tables, Lists, Quotes, Dividers, Code Blocks).
-* **Document Outline (Table of Contents)**: Automatically extracts hierarchical headings (H1–H6) with clickable jump-to-section navigation.
-* **Document Analytics**: Real-time word count, character count, line count, paragraph count, and estimated reading time.
-* **Multi-Tab Workspace**: Open and edit multiple Markdown files simultaneously with dirty indicators (`•`) and tab management.
-* **Workspace File Explorer**: Built-in file browser to explore directories, open files, create new documents, and delete files.
+* **Document Outline (Table of Contents)**: Automatically extracts hierarchical headings (H1–H6) from both Markdown and HTML documents with clickable jump-to-section navigation.
+* **Document Analytics**: Real-time word count, character count, line count, paragraph count, and estimated reading time (with HTML tag stripping for accurate metric analysis).
+* **Multi-Tab Workspace**: Open and edit multiple Markdown and HTML files simultaneously with dirty indicators (`•`) and tab management.
+* **Workspace File Explorer**: Built-in file browser to explore directories, open documents, create new documents, and delete files.
 * **Find & Replace**: Floating search bar with match counter, next/prev navigation, replace, and replace all.
 * **Multi-Theme Support**: Dark, Light, Nord, and Monokai color schemes adhering to Swiss Modernism 2.0 aesthetics with WCAG AAA contrast.
 * **Export Options**:
@@ -47,6 +52,8 @@ mdterm/
 │       ├── app.rs              # Root application state & global shortcuts
 │       ├── state.rs            # Reactive state models (Tabs, Themes, Modes, Stats)
 │       ├── tauri_bridge.rs     # Tauri IPC bridge with browser fallback
+│       ├── html/
+│       │   └── mod.rs          # HTML envelope parser, tag stripper, outline extractor, DOM cleaner
 │       ├── markdown/
 │       │   ├── parser.rs       # Markdown -> HTML (pulldown-cmark with GFM extensions)
 │       │   ├── serializer.rs   # HTML -> Markdown (htmd with tasklist normalization)
@@ -261,6 +268,7 @@ character_height: 1.25
 | `Ctrl + I` | Italic |
 | `Ctrl + U` | Underline |
 | `Ctrl + K` | Insert link |
+| `Ctrl + M` | Cycle editor mode (Visual -> Split -> Source) |
 | `Ctrl + 1..6` | Format as Heading 1..6 |
 | `Alt + 1` | Switch to WYSIWYG Mode |
 | `Alt + 2` | Switch to Split Mode |

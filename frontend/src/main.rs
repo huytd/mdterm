@@ -1,5 +1,6 @@
 mod app;
 mod components;
+pub mod html;
 mod markdown;
 mod state;
 mod tauri_bridge;

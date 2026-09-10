@@ -7,6 +7,8 @@ pub fn StatusBar(
     mode: RwSignal<EditorMode>,
     is_dirty: Signal<bool>,
     file_path: Signal<Option<String>>,
+    #[prop(optional)]
+    is_html: Option<Signal<bool>>,
 ) -> impl IntoView {
     view! {
         <footer class="app-status-bar">
@@ -14,7 +16,10 @@ pub fn StatusBar(
                 <span class="status-item file-status">
                     {move || {
                         let dirty = is_dirty.get();
-                        let path = file_path.get().unwrap_or_else(|| "Untitled.md".to_string());
+                        let path = file_path.get().unwrap_or_else(|| {
+                            let html = is_html.map(|s| s.get()).unwrap_or(false);
+                            if html { "Untitled.html".to_string() } else { "Untitled.md".to_string() }
+                        });
                         view! {
                             <span class=if dirty { "dirty-badge is-dirty" } else { "dirty-badge" }>
                                 {if dirty { "• Unsaved" } else { "✓ Saved" }}
@@ -52,7 +57,12 @@ pub fn StatusBar(
                     </span>
                 </span>
                 <span class="status-item-separator">"|"</span>
-                <span class="status-item format-badge">"UTF-8 · GFM"</span>
+                <span class="status-item format-badge">
+                    {move || {
+                        let html = is_html.map(|s| s.get()).unwrap_or(false);
+                        if html { "UTF-8 · HTML" } else { "UTF-8 · GFM" }
+                    }}
+                </span>
             </div>
         </footer>
     }

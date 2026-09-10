@@ -106,6 +106,26 @@ mod theme_tests {
     }
 }
 
+#[cfg(test)]
+mod stats_tests {
+    use super::DocumentStats;
+
+    #[test]
+    fn test_document_stats_markdown() {
+        let md = "# Title\n\nThis is a paragraph with words.";
+        let stats = DocumentStats::compute(md, false);
+        assert_eq!(stats.words, 8);
+        assert_eq!(stats.paragraphs, 2);
+    }
+
+    #[test]
+    fn test_document_stats_html() {
+        let html = "<div><h1>Title</h1><p>This is a paragraph with words.</p></div>";
+        let stats = DocumentStats::compute(html, true);
+        assert_eq!(stats.words, 7);
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum EditorPosition {
     Left,
@@ -162,12 +182,17 @@ impl Default for DocumentStats {
 
 impl DocumentStats {
     #[allow(dead_code)]
-    pub fn compute(text: &str) -> Self {
-        let chars = text.chars().count();
-        let chars_no_spaces = text.chars().filter(|c| !c.is_whitespace()).count();
-        let lines = text.lines().count().max(1);
-        let words = text.split_whitespace().count();
-        let paragraphs = text
+    pub fn compute(text: &str, is_html: bool) -> Self {
+        let clean_text = if is_html {
+            crate::html::strip_html_tags(text)
+        } else {
+            text.to_string()
+        };
+        let chars = clean_text.chars().count();
+        let chars_no_spaces = clean_text.chars().filter(|c| !c.is_whitespace()).count();
+        let lines = clean_text.lines().count().max(1);
+        let words = clean_text.split_whitespace().count();
+        let paragraphs = clean_text
             .split("\n\n")
             .filter(|p| !p.trim().is_empty())
             .count()

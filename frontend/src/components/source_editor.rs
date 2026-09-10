@@ -4,8 +4,10 @@ use web_sys::{HtmlTextAreaElement, KeyboardEvent};
 #[component]
 pub fn SourceEditor(
     content: RwSignal<String>,
+    #[prop(optional)] is_html: Option<Signal<bool>>,
     on_change: Callback<String>,
 ) -> impl IntoView {
+    let is_html_sig = is_html.unwrap_or_else(|| Signal::derive(|| false));
     let textarea_ref = NodeRef::<leptos::html::Textarea>::new();
     let gutter_ref = NodeRef::<leptos::html::Div>::new();
 
@@ -68,7 +70,7 @@ pub fn SourceEditor(
                 on:input=handle_input
                 on:scroll=handle_scroll
                 on:keydown=handle_keydown
-                placeholder="Type raw Markdown here..."
+                placeholder=move || if is_html_sig.get() { "Type raw HTML here..." } else { "Type raw Markdown here..." }
             ></textarea>
         </div>
     }

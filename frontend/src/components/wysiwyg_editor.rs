@@ -1,6 +1,7 @@
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{HtmlElement, KeyboardEvent, MouseEvent};
+use crate::html::{clean_html_editor_output, HtmlEnvelope};
 use crate::markdown::{html_to_markdown, markdown_to_html};
 use crate::state::SlashMenuState;
 use crate::tauri_bridge::{exec_editor_cmd, get_cursor_pos};
@@ -8,24 +9,32 @@ use crate::tauri_bridge::{exec_editor_cmd, get_cursor_pos};
 #[component]
 pub fn WysiwygEditor(
     content: RwSignal<String>,
+    #[prop(optional)] is_html: Option<Signal<bool>>,
     on_change: Callback<String>,
     slash_menu: RwSignal<SlashMenuState>,
 ) -> impl IntoView {
+    let is_html_sig = is_html.unwrap_or_else(|| Signal::derive(|| false));
     let editor_ref = NodeRef::<leptos::html::Div>::new();
     let is_internal_update = StoredValue::new(false);
 
     // Synchronize HTML when external content changes
     Effect::new(move |_| {
-        let md = content.get();
+        let text = content.get();
+        let is_h = is_html_sig.get();
         if is_internal_update.get_value() {
             is_internal_update.set_value(false);
             return;
         }
 
         if let Some(el) = editor_ref.get() {
-            let rendered_html = markdown_to_html(&md, true);
             let raw_el: &HtmlElement = el.as_ref();
-            raw_el.set_inner_html(&rendered_html);
+            if is_h {
+                let env = HtmlEnvelope::parse(&text);
+                raw_el.set_inner_html(&env.body);
+            } else {
+                let rendered_html = markdown_to_html(&text, true);
+                raw_el.set_inner_html(&rendered_html);
+            }
             crate::tauri_bridge::render_mermaid_diagrams();
         }
     });
@@ -34,11 +43,20 @@ pub fn WysiwygEditor(
         if let Some(el) = editor_ref.get() {
             let raw_el: &HtmlElement = el.as_ref();
             let html = raw_el.inner_html();
-            let md = html_to_markdown(&html);
 
             is_internal_update.set_value(true);
-            content.set(md.clone());
-            on_change.run(md);
+            if is_html_sig.get() {
+                let clean_body = clean_html_editor_output(&html);
+                let current_text = content.get_untracked();
+                let env = HtmlEnvelope::parse(&current_text);
+                let full_html = env.reassemble(&clean_body);
+                content.set(full_html.clone());
+                on_change.run(full_html);
+            } else {
+                let md = html_to_markdown(&html);
+                content.set(md.clone());
+                on_change.run(md);
+            }
         }
     };
 
@@ -55,11 +73,20 @@ pub fn WysiwygEditor(
                     if let Some(el) = editor_ref.get() {
                         let raw_el: &HtmlElement = el.as_ref();
                         let html = raw_el.inner_html();
-                        let md = html_to_markdown(&html);
 
                         is_internal_update.set_value(true);
-                        content.set(md.clone());
-                        on_change.run(md);
+                        if is_html_sig.get() {
+                            let clean_body = clean_html_editor_output(&html);
+                            let current_text = content.get_untracked();
+                            let env = HtmlEnvelope::parse(&current_text);
+                            let full_html = env.reassemble(&clean_body);
+                            content.set(full_html.clone());
+                            on_change.run(full_html);
+                        } else {
+                            let md = html_to_markdown(&html);
+                            content.set(md.clone());
+                            on_change.run(md);
+                        }
                     }
                 }
             }
@@ -143,7 +170,7 @@ pub fn WysiwygEditor(
                 class="wysiwyg-surface"
                 contenteditable="true"
                 spellcheck="false"
-                attr:data-placeholder="Start typing or press '/' for commands..."
+                attr:data-placeholder=move || if is_html_sig.get() { "Start typing HTML content or press '/' for commands..." } else { "Start typing or press '/' for commands..." }
                 on:input=handle_input
                 on:click=handle_click
                 on:keydown=handle_keydown

@@ -16,5 +16,7 @@ pub mod terminal;
 
 pub use header::{EditorHeader, FloatingControls};
 pub use modals::Modals;
+pub use source_editor::SourceEditor;
+pub use split_editor::SplitEditor;
 pub use terminal::TerminalPane;
 pub use wysiwyg_editor::WysiwygEditor;

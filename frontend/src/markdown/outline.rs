@@ -71,3 +71,12 @@ pub fn extract_outline(markdown: &str) -> Vec<OutlineItem> {
 
     items
 }
+
+#[allow(dead_code)]
+pub fn extract_outline_auto(content: &str, is_html: bool) -> Vec<OutlineItem> {
+    if is_html {
+        crate::html::extract_html_outline(content)
+    } else {
+        extract_outline(content)
+    }
+}

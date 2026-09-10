@@ -448,7 +448,7 @@ pub fn Modals(
                             <input
                                 type="text"
                                 class="modal-input"
-                                placeholder="notes.md"
+                                placeholder="notes.md or index.html"
                                 prop:value=move || new_filename.get()
                                 on:input=move |ev| new_filename.set(event_target_value(&ev))
                             />
@@ -477,7 +477,7 @@ pub fn Modals(
                 <div class="modal-backdrop" on:click=move |_| active_modal.set(ActiveModal::None)>
                     <div class="modal-dialog" on:click=move |ev| ev.stop_propagation()>
                         <div class="modal-header">
-                            <h3>"Open Markdown File"</h3>
+                            <h3>"Open Document"</h3>
                             <button type="button" class="modal-close-btn" on:click=move |_| active_modal.set(ActiveModal::None)>"×"</button>
                         </div>
                         <div class="modal-body">
@@ -485,7 +485,7 @@ pub fn Modals(
                             <input
                                 type="text"
                                 class="modal-input"
-                                placeholder="e.g. README.md or /path/to/file.md"
+                                placeholder="e.g. README.md, index.html, or /path/to/file"
                                 prop:value=move || open_filepath.get()
                                 on:input=move |ev| open_filepath.set(event_target_value(&ev))
                             />
@@ -496,6 +496,13 @@ pub fn Modals(
                                     on:click=move |_| open_filepath.set("README.md".to_string())
                                 >
                                     "README.md"
+                                </button>
+                                <button
+                                    type="button"
+                                    class="sample-pill-btn"
+                                    on:click=move |_| open_filepath.set("index.html".to_string())
+                                >
+                                    "index.html"
                                 </button>
                                 <button
                                     type="button"

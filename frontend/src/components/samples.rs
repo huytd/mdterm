@@ -135,3 +135,36 @@ A handy reference guide for CommonMark and GitHub Flavored Markdown (GFM).
 
 ![MdTerm](https://picsum.photos/600/200)
 "#;
+
+#[allow(dead_code)]
+pub const SAMPLE_HTML: &str = r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Welcome to MdTerm HTML</title>
+</head>
+<body>
+  <h1>Welcome to HTML Editing in MdTerm 🌐</h1>
+  <p>MdTerm provides first-class support for opening, editing, viewing, and saving HTML files.</p>
+
+  <h2>Features</h2>
+  <ul>
+    <li><strong>WYSIWYG Visual Editing</strong>: Edit HTML documents directly as rendered web pages.</li>
+    <li><strong>Split & Source Modes</strong>: Switch to Split or Source view to inspect and edit raw markup.</li>
+    <li><strong>Document Integrity</strong>: Keeps your <code>&lt;!DOCTYPE&gt;</code>, <code>&lt;head&gt;</code>, meta tags, and styles intact when saving.</li>
+  </ul>
+
+  <h2>Sample Table</h2>
+  <table class="md-table">
+    <thead>
+      <tr><th>Format</th><th>Visual Mode</th><th>Source Mode</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>HTML (.html)</td><td>Supported</td><td>Supported</td></tr>
+      <tr><td>Markdown (.md)</td><td>Supported</td><td>Supported</td></tr>
+    </tbody>
+  </table>
+</body>
+</html>
+"#;
