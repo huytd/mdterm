@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../frontend/dist",
     "devUrl": "http://127.0.0.1:8080",
-    "beforeDevCommand": "trunk serve",
-    "beforeBuildCommand": "trunk build --release"
+    "beforeDevCommand": "[ -d frontend ] && (cd frontend && trunk serve) || (cd ../frontend && trunk serve)",
+    "beforeBuildCommand": "[ -d frontend ] && (cd frontend && trunk build --release) || (cd ../frontend && trunk build --release)"
   },
   "app": {
     "withGlobalTauri": true,
