@@ -182,7 +182,7 @@ export function initTerminalSession(containerId) {
     const initialTheme = getTerminalTheme(window._mdtermCurrentTheme || 'dark');
     const term = new Terminal({
         cursorBlink: true,
-        cursorStyle: 'bar',
+        cursorStyle: 'block',
         fontSize: 13,
         lineHeight: 1.25,
         fontFamily: 'JetBrains Mono, Menlo, Monaco, Consolas, "Courier New", monospace',
