@@ -1,0 +1,53 @@
+[package]
+name = "frontend"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+leptos = { version = "0.7.8", features = ["csr"] }
+console_error_panic_hook = "0.1"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+pulldown-cmark = "0.13"
+htmd = "0.5"
+serde-wasm-bindgen = "0.6"
+html-escape = "0.2"
+
+[dependencies.web-sys]
+version = "0.3"
+features = [
+    "Document",
+    "Element",
+    "HtmlElement",
+    "HtmlTextAreaElement",
+    "HtmlInputElement",
+    "HtmlSelectElement",
+    "Window",
+    "Clipboard",
+    "Navigator",
+    "KeyboardEvent",
+    "MouseEvent",
+    "InputEvent",
+    "DomParser",
+    "SupportedType",
+    "Node",
+    "NodeList",
+    "Selection",
+    "Range",
+    "Storage",
+    "File",
+    "FileList",
+    "FileReader",
+    "Blob",
+    "Url",
+    "HtmlAnchorElement",
+    "CustomEvent",
+    "Event",
+    "ScrollIntoViewOptions",
+    "ScrollLogicalPosition",
+    "ScrollBehavior",
+]
+

@@ -1,0 +1,182 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum EditorMode {
+    Wysiwyg,
+    Split,
+    Source,
+}
+
+impl EditorMode {
+    pub fn label(&self) -> &'static str {
+        match self {
+            EditorMode::Wysiwyg => "WYSIWYG",
+            EditorMode::Split => "Split",
+            EditorMode::Source => "Source",
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Theme {
+    Dark,
+    Light,
+    Nord,
+    Monokai,
+}
+
+impl Theme {
+    pub fn class_name(&self) -> &'static str {
+        match self {
+            Theme::Dark => "theme-dark",
+            Theme::Light => "theme-light",
+            Theme::Nord => "theme-nord",
+            Theme::Monokai => "theme-monokai",
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn label(&self) -> &'static str {
+        match self {
+            Theme::Dark => "Dark",
+            Theme::Light => "Light",
+            Theme::Nord => "Nord",
+            Theme::Monokai => "Monokai",
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SidebarTab {
+    Files,
+    Outline,
+    Stats,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DocumentTab {
+    pub id: String,
+    pub title: String,
+    pub path: Option<String>,
+    pub content: String,
+    pub is_dirty: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OutlineItem {
+    pub level: usize,
+    pub text: String,
+    pub id: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DocumentStats {
+    pub words: usize,
+    pub chars: usize,
+    pub chars_no_spaces: usize,
+    pub lines: usize,
+    pub paragraphs: usize,
+    pub reading_time_mins: f32,
+}
+
+impl Default for DocumentStats {
+    fn default() -> Self {
+        Self {
+            words: 0,
+            chars: 0,
+            chars_no_spaces: 0,
+            lines: 1,
+            paragraphs: 1,
+            reading_time_mins: 0.0,
+        }
+    }
+}
+
+impl DocumentStats {
+    pub fn compute(text: &str) -> Self {
+        let chars = text.chars().count();
+        let chars_no_spaces = text.chars().filter(|c| !c.is_whitespace()).count();
+        let lines = text.lines().count().max(1);
+        let words = text.split_whitespace().count();
+        let paragraphs = text
+            .split("\n\n")
+            .filter(|p| !p.trim().is_empty())
+            .count()
+            .max(1);
+        let reading_time_mins = (words as f32 / 200.0).max(0.1);
+
+        Self {
+            words,
+            chars,
+            chars_no_spaces,
+            lines,
+            paragraphs,
+            reading_time_mins,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    pub size: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ActiveModal {
+    None,
+    InsertLink,
+    InsertImage,
+    InsertTable,
+    Export,
+    Help,
+    NewFile,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FindReplaceState {
+    pub is_open: bool,
+    pub search_query: String,
+    pub replace_query: String,
+    pub match_case: bool,
+    pub whole_word: bool,
+    pub current_match: usize,
+    pub total_matches: usize,
+}
+
+impl Default for FindReplaceState {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            search_query: String::new(),
+            replace_query: String::new(),
+            match_case: false,
+            whole_word: false,
+            current_match: 0,
+            total_matches: 0,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SlashMenuState {
+    pub is_open: bool,
+    pub query: String,
+    pub selected_index: usize,
+    pub x: f64,
+    pub y: f64,
+}
+
+impl Default for SlashMenuState {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            query: String::new(),
+            selected_index: 0,
+            x: 0.0,
+            y: 0.0,
+        }
+    }
+}

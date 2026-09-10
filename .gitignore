@@ -1,0 +1,4 @@
+/target
+/frontend/dist
+**/*.rs.bk
+.DS_Store
