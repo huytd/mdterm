@@ -181,6 +181,118 @@ export function initTerminalSession(containerId) {
 
     const hasTauri = !!(window.__TAURI__ && window.__TAURI__.core);
 
+    // Clickable file opening handler
+    const handleTerminalFileClick = async (clickedPath) => {
+        if (!clickedPath) return;
+
+        let cleanPath = clickedPath.trim().replace(/^['"`]+|['"`]+$/g, '');
+        if (cleanPath.includes(':')) {
+            const colonIdx = cleanPath.indexOf(':');
+            if (colonIdx > 0) cleanPath = cleanPath.substring(0, colonIdx);
+        }
+
+        const filename = cleanPath.split('/').pop() || cleanPath;
+
+        if (hasTauri) {
+            const invoke = window.__TAURI__.core.invoke;
+            let resolvedPath = cleanPath;
+
+            try {
+                if (!cleanPath.startsWith('/') && !cleanPath.startsWith('~')) {
+                    let cwd = window._mdtermCwd || '';
+                    if (!cwd) {
+                        cwd = await invoke('pty_get_cwd').catch(() => '');
+                    }
+                    if (cwd) {
+                        resolvedPath = cwd.replace(/\/+$/, '') + '/' + cleanPath;
+                    }
+                } else if (cleanPath.startsWith('~/')) {
+                    const home = await invoke('get_home_dir').catch(() => '');
+                    if (home) {
+                        resolvedPath = home + cleanPath.slice(1);
+                    }
+                }
+
+                // Try reading file locally
+                const content = await invoke('read_file', { path: resolvedPath });
+                showToast("Opened '" + filename + "' in editor");
+                window.dispatchEvent(new CustomEvent('mdterm-open-file', {
+                    detail: { name: filename, path: resolvedPath, content }
+                }));
+                return;
+            } catch (e) {
+                // Not found locally or error reading local file.
+                // This happens when the user is on a remote SSH server or inside a remote tmux session!
+            }
+
+            // Fallback for remote SSH / tmux: invoke mdterm in terminal
+            showToast("Opening '" + filename + "' from terminal...");
+            invoke('pty_write', { data: 'mdterm "' + cleanPath + '"\n' }).catch(() => {});
+        } else {
+            // Browser preview mode
+            showToast("Opened '" + filename + "' in demo editor");
+            window.dispatchEvent(new CustomEvent('mdterm-open-file', {
+                detail: { name: filename, path: cleanPath, content: '# ' + filename + '\n\nOpened via terminal click.' }
+            }));
+        }
+    };
+
+    // OSC 7 for shell current working directory reporting
+    if (term.parser && typeof term.parser.registerOscHandler === 'function') {
+        term.parser.registerOscHandler(7, (data) => {
+            try {
+                if (data.startsWith('file://')) {
+                    const url = new URL(data);
+                    window._mdtermCwd = decodeURI(url.pathname);
+                }
+            } catch (e) {}
+            return true;
+        });
+    }
+
+    // Register Link Provider in xterm.js for files (like from `ls` output)
+    const fileLinkRegex = /(?:^|[\s"'\(\)\[\]<>{},;:`])((?:(?:\.|\.\.|\~)?\/)?(?:[\w.-]+\/)*[\w.-]+\.(?:md|markdown|mdown|mkd|txt|rst|org|html|toml|json|yaml|yml|sh|rs|js|ts|css|py|c|cpp|h|go))(?:[\s"'\(\)\[\]<>{},;:`]|$)/gi;
+
+    if (typeof term.registerLinkProvider === 'function') {
+        term.registerLinkProvider({
+            provideLinks(bufferLineNumber, callback) {
+                const line = term.buffer.active.getLine(bufferLineNumber - 1);
+                if (!line) {
+                    callback(undefined);
+                    return;
+                }
+
+                const lineText = line.translateToString(true);
+                const links = [];
+                let match;
+                fileLinkRegex.lastIndex = 0;
+
+                while ((match = fileLinkRegex.exec(lineText)) !== null) {
+                    const fullMatch = match[0];
+                    const rawPath = match[1];
+                    const leadingOffset = fullMatch.indexOf(rawPath);
+                    const startX = match.index + leadingOffset + 1; // 1-based x
+                    const endX = startX + rawPath.length - 1;
+
+                    links.push({
+                        range: {
+                            start: { x: startX, y: bufferLineNumber },
+                            end: { x: endX, y: bufferLineNumber }
+                        },
+                        text: rawPath,
+                        activate: async (event, clickedText) => {
+                            await handleTerminalFileClick(clickedText);
+                        }
+                    });
+
+                    fileLinkRegex.lastIndex = match.index + leadingOffset + rawPath.length;
+                }
+
+                callback(links);
+            }
+        });
+    }
+
     if (hasTauri) {
         const invoke = window.__TAURI__.core.invoke;
         const event = window.__TAURI__.event;

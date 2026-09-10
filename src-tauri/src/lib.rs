@@ -9,6 +9,7 @@ use tauri::{AppHandle, Emitter, State};
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
+    child_pid: Option<u32>,
 }
 
 #[derive(Default)]
@@ -164,8 +165,9 @@ fn pty_spawn(app: AppHandle, state: State<PtyState>, cols: u16, rows: u16) -> Re
         cmd.cwd(current_dir);
     }
 
-    let _child = pair.slave.spawn_command(cmd)
+    let child = pair.slave.spawn_command(cmd)
         .map_err(|e| format!("Failed to spawn shell '{}': {}", shell, e))?;
+    let child_pid = child.process_id();
 
     // Drop slave in parent so EOF is triggered when shell exits
     drop(pair.slave);
@@ -181,6 +183,7 @@ fn pty_spawn(app: AppHandle, state: State<PtyState>, cols: u16, rows: u16) -> Re
         *sess = Some(PtySession {
             master: pair.master,
             writer,
+            child_pid,
         });
     }
 
@@ -206,6 +209,40 @@ fn pty_spawn(app: AppHandle, state: State<PtyState>, cols: u16, rows: u16) -> Re
     });
 
     Ok(())
+}
+
+#[tauri::command]
+fn pty_get_cwd(state: State<PtyState>) -> Result<String, String> {
+    let sess = state.session.lock().map_err(|_| "Lock error".to_string())?;
+    if let Some(session) = sess.as_ref() {
+        if let Some(pid) = session.child_pid {
+            // Check tmux pane_current_path if tmux is running
+            if let Ok(out) = std::process::Command::new("tmux")
+                .args(["display-message", "-p", "#{pane_current_path}"])
+                .output()
+            {
+                if out.status.success() {
+                    let tmux_path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    if !tmux_path.is_empty() && std::path::Path::new(&tmux_path).is_dir() {
+                        return Ok(tmux_path);
+                    }
+                }
+            }
+
+            // On Linux, read /proc/<pid>/cwd
+            #[cfg(target_os = "linux")]
+            {
+                let proc_path = format!("/proc/{}/cwd", pid);
+                if let Ok(link) = std::fs::read_link(&proc_path) {
+                    return Ok(link.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+
+    std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .map_err(|e| format!("Could not get cwd: {}", e))
 }
 
 #[tauri::command]
@@ -258,6 +295,7 @@ pub fn run() {
             rename_file,
             export_document,
             pty_spawn,
+            pty_get_cwd,
             pty_write,
             pty_resize
         ])
