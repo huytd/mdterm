@@ -53,6 +53,7 @@ pub enum SidebarTab {
     Stats,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DocumentTab {
     pub id: String,
@@ -69,6 +70,7 @@ pub struct OutlineItem {
     pub id: String,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct DocumentStats {
     pub words: usize,
@@ -93,6 +95,7 @@ impl Default for DocumentStats {
 }
 
 impl DocumentStats {
+    #[allow(dead_code)]
     pub fn compute(text: &str) -> Self {
         let chars = text.chars().count();
         let chars_no_spaces = text.chars().filter(|c| !c.is_whitespace()).count();
@@ -124,6 +127,7 @@ pub struct FileEntry {
     pub size: u64,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ActiveModal {
     None,
@@ -133,6 +137,7 @@ pub enum ActiveModal {
     Export,
     Help,
     NewFile,
+    OpenFile,
 }
 
 #[derive(Clone, Debug, PartialEq)]

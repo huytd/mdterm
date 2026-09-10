@@ -1,127 +1,50 @@
 use leptos::prelude::*;
-use web_sys::KeyboardEvent;
+use web_sys::{KeyboardEvent, MouseEvent};
 
-use crate::components::samples::{GUIDE_MD, WELCOME_MD};
-use crate::components::{
-    Header, Modals, Sidebar, SplitEditor, StatusBar, Toolbar, WysiwygEditor,
-};
-use crate::markdown::{extract_outline, markdown_to_html};
-use crate::state::{
-    ActiveModal, DocumentStats, DocumentTab, EditorMode, FileEntry, FindReplaceState,
-    SidebarTab, SlashMenuState, Theme,
-};
-use crate::tauri_bridge::{self, exec_editor_cmd, window_find};
+use crate::components::samples::WELCOME_MD;
+use crate::components::{Header, Modals, TerminalPane, WysiwygEditor};
+use crate::markdown::markdown_to_html;
+use crate::state::{ActiveModal, FindReplaceState, SlashMenuState, Theme};
+use crate::tauri_bridge::{self, exec_editor_cmd, fit_terminal_session, window_find};
 
 #[component]
 pub fn App() -> impl IntoView {
     // 1. Core State
-    let initial_tabs = vec![
-        DocumentTab {
-            id: "tab-1".to_string(),
-            title: "Welcome.md".to_string(),
-            path: Some("Welcome.md".to_string()),
-            content: WELCOME_MD.to_string(),
-            is_dirty: false,
-        },
-        DocumentTab {
-            id: "tab-2".to_string(),
-            title: "Syntax-Guide.md".to_string(),
-            path: Some("Syntax-Guide.md".to_string()),
-            content: GUIDE_MD.to_string(),
-            is_dirty: false,
-        },
-    ];
-
-    let tabs = RwSignal::new(initial_tabs);
-    let active_tab_idx = RwSignal::new(0usize);
-    let active_mode = RwSignal::new(EditorMode::Wysiwyg);
+    let active_filename = RwSignal::new(String::from("Welcome.md"));
+    let active_path = RwSignal::new(Some(String::from("Welcome.md")));
+    let active_content = RwSignal::new(WELCOME_MD.to_string());
+    let is_dirty = RwSignal::new(false);
     let current_theme = RwSignal::new(Theme::Dark);
 
-    let sidebar_open = RwSignal::new(true);
-    let sidebar_tab = RwSignal::new(SidebarTab::Files);
-    let files = RwSignal::new(Vec::<FileEntry>::new());
-    let current_dir = RwSignal::new(String::from("Documents"));
+    // Split ratio between Editor (left) and Terminal (right)
+    let split_ratio = RwSignal::new(50.0f64);
+    let is_dragging = RwSignal::new(false);
 
+    // Modals and menus
     let active_modal = RwSignal::new(ActiveModal::None);
     let find_replace = RwSignal::new(FindReplaceState::default());
     let slash_menu = RwSignal::new(SlashMenuState::default());
 
-    // 2. Active document content signal
-    let active_content = RwSignal::new(WELCOME_MD.to_string());
-
-    // When tab index changes, update active_content
-    Effect::new(move |_| {
-        let idx = active_tab_idx.get();
-        let tab_list = tabs.get();
-        if let Some(tab) = tab_list.get(idx) {
-            active_content.set(tab.content.clone());
-        }
-    });
-
-    // 3. Derived Outline and Stats
-    let outline = Memo::new(move |_| {
-        let md = active_content.get();
-        extract_outline(&md)
-    });
-
-    let stats = Memo::new(move |_| {
-        let md = active_content.get();
-        DocumentStats::compute(&md)
-    });
-
-    // Load initial files from current directory
-    Effect::new(move |_| {
-        leptos::task::spawn_local(async move {
-            if let Ok(dir) = tauri_bridge::get_current_dir().await {
-                current_dir.set(dir.clone());
-                if let Ok(list) = tauri_bridge::read_dir(&dir).await {
-                    files.set(list);
-                }
-            }
-        });
-    });
-
     // Handle content updates from editor
     let handle_content_change = Callback::new(move |new_text: String| {
-        let idx = active_tab_idx.get();
-        tabs.update(|list| {
-            if let Some(tab) = list.get_mut(idx) {
-                tab.content = new_text;
-                tab.is_dirty = true;
-            }
-        });
+        active_content.set(new_text);
+        is_dirty.set(true);
     });
 
     // Save active document
     let save_active_document = move || {
-        let idx = active_tab_idx.get();
-        let (path_opt, content) = {
-            let list = tabs.get();
-            if let Some(tab) = list.get(idx) {
-                (tab.path.clone(), tab.content.clone())
-            } else {
-                return;
-            }
-        };
+        let content = active_content.get();
+        let target_path = active_path.get().unwrap_or_else(|| active_filename.get());
 
-        let target_path = path_opt.unwrap_or_else(|| format!("Untitled-{}.md", idx + 1));
         leptos::task::spawn_local(async move {
             if tauri_bridge::write_file(&target_path, &content).await.is_ok() {
-                tabs.update(|list| {
-                    if let Some(tab) = list.get_mut(idx) {
-                        tab.is_dirty = false;
-                        if tab.path.is_none() {
-                            tab.path = Some(target_path.clone());
-                            tab.title = target_path.clone();
-                        }
-                    }
-                });
-
-                // Refresh files
-                let dir = current_dir.get();
-                if let Ok(list) = tauri_bridge::read_dir(&dir).await {
-                    files.set(list);
-                }
+                is_dirty.set(false);
+                active_path.set(Some(target_path.clone()));
+                let name = std::path::Path::new(&target_path)
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or(target_path);
+                active_filename.set(name);
             }
         });
     };
@@ -131,105 +54,28 @@ pub fn App() -> impl IntoView {
         let path_clone = path.clone();
         leptos::task::spawn_local(async move {
             if let Ok(content) = tauri_bridge::read_file(&path_clone).await {
-                let filename = std::path::Path::new(&path_clone)
+                let name = std::path::Path::new(&path_clone)
                     .file_name()
                     .map(|s| s.to_string_lossy().to_string())
                     .unwrap_or_else(|| path_clone.clone());
 
-                let mut found_idx = None;
-                let list = tabs.get();
-                for (i, t) in list.iter().enumerate() {
-                    if t.path.as_deref() == Some(&path_clone) {
-                        found_idx = Some(i);
-                        break;
-                    }
-                }
-
-                if let Some(idx) = found_idx {
-                    active_tab_idx.set(idx);
-                } else {
-                    let new_tab = DocumentTab {
-                        id: format!("tab-{}", list.len() + 1),
-                        title: filename,
-                        path: Some(path_clone),
-                        content,
-                        is_dirty: false,
-                    };
-                    tabs.update(|l| l.push(new_tab));
-                    active_tab_idx.set(tabs.get().len() - 1);
-                }
+                active_content.set(content);
+                active_filename.set(name);
+                active_path.set(Some(path_clone));
+                is_dirty.set(false);
             }
         });
     });
 
-    // Delete file
-    let delete_file_by_path = Callback::new(move |path: String| {
-        leptos::task::spawn_local(async move {
-            let _ = tauri_bridge::delete_file(&path).await;
-            let dir = current_dir.get();
-            if let Ok(list) = tauri_bridge::read_dir(&dir).await {
-                files.set(list);
-            }
-        });
+    // New Document
+    let handle_new_file = Callback::new(move |_| {
+        active_filename.set("Untitled.md".to_string());
+        active_path.set(None);
+        active_content.set("# Untitled Document\n\nStart typing here...".to_string());
+        is_dirty.set(false);
     });
 
-    // New Tab
-    let handle_new_tab = Callback::new(move |_| {
-        let list_len = tabs.get().len();
-        let new_tab = DocumentTab {
-            id: format!("tab-{}", list_len + 1),
-            title: format!("Untitled-{}.md", list_len + 1),
-            path: None,
-            content: "# Untitled Document\n\nStart typing here...".to_string(),
-            is_dirty: false,
-        };
-        tabs.update(|l| l.push(new_tab));
-        active_tab_idx.set(list_len);
-    });
-
-    // Close Tab
-    let handle_close_tab = Callback::new(move |close_idx: usize| {
-        tabs.update(|list| {
-            if list.len() > 1 {
-                list.remove(close_idx);
-            }
-        });
-        let cur = active_tab_idx.get();
-        if cur >= tabs.get().len() {
-            active_tab_idx.set(tabs.get().len() - 1);
-        }
-    });
-
-    // Load sample template
-    let handle_load_template = Callback::new(move |template: &'static str| {
-        let (title, content) = match template {
-            "guide" => ("Syntax-Guide.md", GUIDE_MD),
-            _ => ("Welcome.md", WELCOME_MD),
-        };
-        let list_len = tabs.get().len();
-        let new_tab = DocumentTab {
-            id: format!("tab-{}", list_len + 1),
-            title: title.to_string(),
-            path: None,
-            content: content.to_string(),
-            is_dirty: true,
-        };
-        tabs.update(|l| l.push(new_tab));
-        active_tab_idx.set(list_len);
-    });
-
-    // Jump to heading anchor
-    let handle_jump_to_heading = Callback::new(move |anchor_id: String| {
-        if let Some(win) = web_sys::window() {
-            if let Some(doc) = win.document() {
-                if let Some(el) = doc.get_element_by_id(&anchor_id) {
-                    el.scroll_into_view();
-                }
-            }
-        }
-    });
-
-    // Toolbar formatting commands
+    // Toolbar / Shortcut formatting commands
     let handle_format = Callback::new(move |cmd: &'static str| {
         match cmd {
             "tasklist" => {
@@ -281,18 +127,6 @@ pub fn App() -> impl IntoView {
         exec_editor_cmd("insertHTML", Some(&img_html));
     });
 
-    let handle_insert_hr = Callback::new(move |_| {
-        exec_editor_cmd("insertHorizontalRule", None);
-    });
-
-    let handle_undo = Callback::new(move |_| {
-        exec_editor_cmd("undo", None);
-    });
-
-    let handle_redo = Callback::new(move |_| {
-        exec_editor_cmd("redo", None);
-    });
-
     // Slash command insertion
     let handle_slash_select = Callback::new(move |item_type: &'static str| {
         slash_menu.set(SlashMenuState::default());
@@ -322,8 +156,7 @@ pub fn App() -> impl IntoView {
     // Export confirmation
     let handle_export_confirm = Callback::new(move |format_choice: &'static str| {
         let md = active_content.get();
-        let idx = active_tab_idx.get();
-        let base_name = tabs.get().get(idx).map(|t| t.title.clone()).unwrap_or_else(|| "document".to_string());
+        let base_name = active_filename.get();
         let clean_name = base_name.trim_end_matches(".md");
 
         match format_choice {
@@ -365,18 +198,6 @@ pub fn App() -> impl IntoView {
                 tauri_bridge::triggerDownload(&format!("{}.md", clean_name), &md, "text/markdown");
             }
         }
-    });
-
-    // New file dialog confirm
-    let handle_new_file_confirm = Callback::new(move |filename: String| {
-        let dir = current_dir.get();
-        let full_path = format!("{}/{}", dir, filename);
-        let path_clone = full_path.clone();
-        leptos::task::spawn_local(async move {
-            if tauri_bridge::create_file(&path_clone).await.is_ok() {
-                open_file_by_path.run(path_clone);
-            }
-        });
     });
 
     // Find and Replace logic
@@ -432,139 +253,93 @@ pub fn App() -> impl IntoView {
                 }
                 "o" => {
                     ev.prevent_default();
-                    sidebar_open.set(true);
-                    sidebar_tab.set(SidebarTab::Files);
+                    active_modal.set(ActiveModal::OpenFile);
                 }
                 "n" => {
                     ev.prevent_default();
-                    handle_new_tab.run(());
-                }
-                "w" => {
-                    ev.prevent_default();
-                    handle_close_tab.run(active_tab_idx.get());
+                    handle_new_file.run(());
                 }
                 "f" => {
                     ev.prevent_default();
                     find_replace.update(|s| s.is_open = !s.is_open);
-                }
-                "1" => {
-                    if ev.alt_key() {
-                        ev.prevent_default();
-                        active_mode.set(EditorMode::Wysiwyg);
-                    }
-                }
-                "2" => {
-                    if ev.alt_key() {
-                        ev.prevent_default();
-                        active_mode.set(EditorMode::Split);
-                    }
-                }
-                "3" => {
-                    if ev.alt_key() {
-                        ev.prevent_default();
-                        active_mode.set(EditorMode::Source);
-                    }
                 }
                 _ => {}
             }
         }
     };
 
-    let active_is_dirty = Signal::derive(move || {
-        let idx = active_tab_idx.get();
-        tabs.get().get(idx).map(|t| t.is_dirty).unwrap_or(false)
-    });
+    // Resizing mouse handlers
+    let on_mouse_move = move |ev: MouseEvent| {
+        if is_dragging.get() {
+            if let Some(win) = web_sys::window() {
+                let inner_width = win.inner_width().ok().and_then(|w| w.as_f64()).unwrap_or(1200.0);
+                let client_x = ev.client_x() as f64;
+                let pct = (client_x / inner_width) * 100.0;
+                let clamped = pct.clamp(20.0, 80.0);
+                split_ratio.set(clamped);
+                fit_terminal_session();
+            }
+        }
+    };
 
-    let active_path = Signal::derive(move || {
-        let idx = active_tab_idx.get();
-        tabs.get().get(idx).and_then(|t| t.path.clone())
-    });
+    let on_mouse_up = move |_| {
+        if is_dragging.get() {
+            is_dragging.set(false);
+            fit_terminal_session();
+        }
+    };
 
     view! {
         <div
             class=move || format!("app-root {}", current_theme.get().class_name())
+            on:mousemove=on_mouse_move
+            on:mouseup=on_mouse_up
             on:keydown=on_window_keydown
             tabindex="0"
         >
             <Header
-                tabs=tabs
-                active_tab_idx=active_tab_idx
-                active_mode=active_mode
+                active_filename=active_filename.into()
+                is_dirty=is_dirty.into()
                 current_theme=current_theme
-                sidebar_open=sidebar_open
-                on_new_tab=handle_new_tab
-                on_close_tab=handle_close_tab
-                on_open_file=Callback::new(move |_| {
-                    sidebar_open.set(true);
-                    sidebar_tab.set(SidebarTab::Files);
-                })
+                on_new_file=handle_new_file
+                on_open_file=Callback::new(move |_| active_modal.set(ActiveModal::OpenFile))
                 on_save_file=Callback::new(move |_| save_active_document())
                 on_export=Callback::new(move |_| active_modal.set(ActiveModal::Export))
-                on_help=Callback::new(move |_| active_modal.set(ActiveModal::Help))
-            />
-
-            <Toolbar
                 on_format=handle_format
                 on_format_block=handle_format_block
-                on_insert_table=Callback::new(move |_| active_modal.set(ActiveModal::InsertTable))
-                on_insert_link=Callback::new(move |_| active_modal.set(ActiveModal::InsertLink))
-                on_insert_image=Callback::new(move |_| active_modal.set(ActiveModal::InsertImage))
-                on_insert_hr=handle_insert_hr
-                on_find_replace=Callback::new(move |_| find_replace.update(|s| s.is_open = !s.is_open))
-                on_undo=handle_undo
-                on_redo=handle_redo
             />
 
             <div class="app-workspace">
-                <Sidebar
-                    is_open=sidebar_open
-                    current_tab=sidebar_tab
-                    files=files
-                    current_dir=current_dir
-                    outline=outline.into()
-                    stats=stats.into()
-                    on_open_file=open_file_by_path
-                    on_new_file=Callback::new(move |_| active_modal.set(ActiveModal::NewFile))
-                    on_delete_file=delete_file_by_path
-                    on_load_template=handle_load_template
-                    on_jump_to_heading=handle_jump_to_heading
-                />
+                <div
+                    class="workspace-pane editor-pane"
+                    style=move || format!("width: {}%;", split_ratio.get())
+                >
+                    <WysiwygEditor
+                        content=active_content
+                        on_change=handle_content_change
+                        slash_menu=slash_menu
+                    />
+                </div>
 
-                <main class="app-editor-area">
-                    {move || match active_mode.get() {
-                        EditorMode::Wysiwyg => view! {
-                            <WysiwygEditor
-                                content=active_content
-                                on_change=handle_content_change
-                                slash_menu=slash_menu
-                            />
-                        }.into_any(),
+                <div
+                    class="workspace-divider"
+                    title="Drag to resize, double-click to reset (50/50)"
+                    on:mousedown=move |_| is_dragging.set(true)
+                    on:dblclick=move |_| {
+                        split_ratio.set(50.0);
+                        fit_terminal_session();
+                    }
+                >
+                    <div class="divider-line"></div>
+                </div>
 
-                        EditorMode::Split => view! {
-                            <SplitEditor
-                                content=active_content
-                                on_change=handle_content_change
-                            />
-                        }.into_any(),
-
-                        EditorMode::Source => view! {
-                            <div class="source-mode-container">
-                                <crate::components::SourceEditor
-                                    content=active_content
-                                    on_change=handle_content_change
-                                />
-                            </div>
-                        }.into_any(),
-                    }}
-                </main>
+                <div
+                    class="workspace-pane terminal-pane-container"
+                    style=move || format!("width: {}%;", 100.0 - split_ratio.get())
+                >
+                    <TerminalPane />
+                </div>
             </div>
-
-            <StatusBar
-                stats=stats
-                mode=active_mode
-                is_dirty=active_is_dirty
-                file_path=active_path
-            />
 
             <Modals
                 active_modal=active_modal
@@ -574,7 +349,13 @@ pub fn App() -> impl IntoView {
                 on_insert_image_confirm=handle_insert_image_confirm
                 on_insert_table_confirm=handle_insert_table_confirm
                 on_export_confirm=handle_export_confirm
-                on_new_file_confirm=handle_new_file_confirm
+                on_new_file_confirm=Callback::new(move |name: String| {
+                    active_filename.set(name.clone());
+                    active_path.set(Some(name));
+                    active_content.set("# New File\n\n".to_string());
+                    is_dirty.set(false);
+                })
+                on_open_file_confirm=open_file_by_path
                 on_find_next=handle_find_next
                 on_find_prev=handle_find_prev
                 on_replace_one=handle_replace_one

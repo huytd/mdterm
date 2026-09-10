@@ -67,6 +67,7 @@ fn main() {
 *   Type `/` on a new line to open the **Slash Command Menu**!
 "#;
 
+#[allow(dead_code)]
 pub const GUIDE_MD: &str = r#"# Markdown Syntax Quick Reference
 
 A handy reference guide for CommonMark and GitHub Flavored Markdown (GFM).

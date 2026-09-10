@@ -43,6 +43,160 @@ export function windowFind(query, caseSensitive, backward) {
     }
     return false;
 }
+
+export function initTerminalSession(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    if (window._mdtermTerminal) {
+        try {
+            window._mdtermTerminal.dispose();
+        } catch (e) {}
+        window._mdtermTerminal = null;
+    }
+    container.innerHTML = '';
+
+    if (typeof Terminal === 'undefined') {
+        const errDiv = document.createElement('div');
+        errDiv.style.color = '#ef4444';
+        errDiv.style.padding = '20px';
+        errDiv.innerText = 'Terminal library (xterm.js) is not loaded.';
+        container.appendChild(errDiv);
+        return;
+    }
+
+    const term = new Terminal({
+        cursorBlink: true,
+        cursorStyle: 'bar',
+        fontSize: 13,
+        lineHeight: 1.25,
+        fontFamily: 'JetBrains Mono, Menlo, Monaco, Consolas, "Courier New", monospace',
+        theme: {
+            background: '#0f141c',
+            foreground: '#e2e8f0',
+            cursor: '#38bdf8',
+            cursorAccent: '#0f141c',
+            selectionBackground: 'rgba(56, 189, 248, 0.35)',
+            black: '#1e293b',
+            red: '#f87171',
+            green: '#4ade80',
+            yellow: '#fbbf24',
+            blue: '#60a5fa',
+            magenta: '#c084fc',
+            cyan: '#38bdf8',
+            white: '#f1f5f9',
+            brightBlack: '#64748b',
+            brightRed: '#ef4444',
+            brightGreen: '#22c55e',
+            brightYellow: '#eab308',
+            brightBlue: '#3b82f6',
+            brightMagenta: '#a855f7',
+            brightCyan: '#06b6d4',
+            brightWhite: '#ffffff'
+        },
+        convertEol: true,
+        allowTransparency: false
+    });
+
+    let fitAddon = null;
+    if (typeof FitAddon !== 'undefined' && FitAddon.FitAddon) {
+        fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+    }
+
+    term.open(container);
+    setTimeout(() => {
+        if (fitAddon) {
+            try { fitAddon.fit(); } catch (e) {}
+        }
+    }, 60);
+
+    const hasTauri = !!(window.__TAURI__ && window.__TAURI__.core);
+
+    if (hasTauri) {
+        const invoke = window.__TAURI__.core.invoke;
+        const event = window.__TAURI__.event;
+
+        const cols = term.cols || 80;
+        const rows = term.rows || 24;
+        invoke('pty_spawn', { cols, rows }).catch(err => {
+            term.write('\r\n\x1b[31mFailed to spawn shell: ' + err + '\x1b[0m\r\n');
+        });
+
+        if (event && typeof event.listen === 'function') {
+            event.listen('pty-output', (e) => {
+                term.write(e.payload);
+            });
+        }
+
+        term.onData(data => {
+            invoke('pty_write', { data }).catch(() => {});
+        });
+
+        const handleResize = () => {
+            if (fitAddon) {
+                try {
+                    fitAddon.fit();
+                    invoke('pty_resize', { cols: term.cols, rows: term.rows }).catch(() => {});
+                } catch (e) {}
+            }
+        };
+
+        const ro = new ResizeObserver(() => {
+            handleResize();
+        });
+        ro.observe(container);
+        window.addEventListener('resize', handleResize);
+    } else {
+        term.write('\x1b[1;36m=== mdterm Terminal Emulator ===\x1b[0m\r\n');
+        term.write('\x1b[90mRunning in browser preview. In Tauri desktop app, a native shell runs here.\x1b[0m\r\n\r\n$ ');
+        let buf = '';
+        term.onData(data => {
+            if (data === '\r') {
+                term.write('\r\n');
+                if (buf.trim() === 'clear') {
+                    term.clear();
+                } else if (buf.trim().length > 0) {
+                    term.write('Command in demo mode: ' + buf + '\r\n');
+                }
+                buf = '';
+                term.write('$ ');
+            } else if (data === '\u007F') {
+                if (buf.length > 0) {
+                    buf = buf.slice(0, -1);
+                    term.write('\b \b');
+                }
+            } else {
+                buf += data;
+                term.write(data);
+            }
+        });
+
+        const ro = new ResizeObserver(() => {
+            if (fitAddon) {
+                try { fitAddon.fit(); } catch (e) {}
+            }
+        });
+        ro.observe(container);
+    }
+
+    window._mdtermTerminal = term;
+    window._mdtermFitAddon = fitAddon;
+}
+
+export function clearTerminalSession() {
+    if (window._mdtermTerminal) {
+        window._mdtermTerminal.clear();
+    }
+}
+
+export function fitTerminalSession() {
+    if (window._mdtermFitAddon) {
+        try {
+            window._mdtermFitAddon.fit();
+        } catch (e) {}
+    }
+}
 "#)]
 extern "C" {
     #[wasm_bindgen(catch)]
@@ -63,6 +217,15 @@ extern "C" {
 
     #[wasm_bindgen(js_name = windowFind)]
     pub fn window_find(query: &str, case_sensitive: bool, backward: bool) -> bool;
+
+    #[wasm_bindgen(js_name = initTerminalSession)]
+    pub fn init_terminal_session(container_id: &str);
+
+    #[wasm_bindgen(js_name = clearTerminalSession)]
+    pub fn clear_terminal_session();
+
+    #[wasm_bindgen(js_name = fitTerminalSession)]
+    pub fn fit_terminal_session();
 }
 
 pub async fn read_file(path: &str) -> Result<String, String> {
@@ -104,6 +267,7 @@ pub async fn write_file(path: &str, contents: &str) -> Result<(), String> {
     }
 }
 
+#[allow(dead_code)]
 pub async fn read_dir(path: &str) -> Result<Vec<FileEntry>, String> {
     if is_tauri_env() {
         let args = serde_wasm_bindgen::to_value(&json!({ "path": path }))
@@ -131,6 +295,7 @@ pub async fn read_dir(path: &str) -> Result<Vec<FileEntry>, String> {
     }
 }
 
+#[allow(dead_code)]
 pub async fn get_current_dir() -> Result<String, String> {
     if is_tauri_env() {
         let args = serde_wasm_bindgen::to_value(&json!({}))
@@ -145,6 +310,7 @@ pub async fn get_current_dir() -> Result<String, String> {
     }
 }
 
+#[allow(dead_code)]
 pub async fn create_file(path: &str) -> Result<(), String> {
     if is_tauri_env() {
         let args = serde_wasm_bindgen::to_value(&json!({ "path": path }))
@@ -158,6 +324,7 @@ pub async fn create_file(path: &str) -> Result<(), String> {
     }
 }
 
+#[allow(dead_code)]
 pub async fn delete_file(path: &str) -> Result<(), String> {
     if is_tauri_env() {
         let args = serde_wasm_bindgen::to_value(&json!({ "path": path }))

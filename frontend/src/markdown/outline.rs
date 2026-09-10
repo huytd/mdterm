@@ -25,6 +25,7 @@ pub fn slugify(text: &str) -> String {
     }
 }
 
+#[allow(dead_code)]
 pub fn extract_outline(markdown: &str) -> Vec<OutlineItem> {
     let mut items = Vec::new();
     let mut in_code_block = false;

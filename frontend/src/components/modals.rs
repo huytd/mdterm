@@ -11,12 +11,14 @@ pub fn Modals(
     on_insert_table_confirm: Callback<(usize, usize)>,
     on_export_confirm: Callback<&'static str>,
     on_new_file_confirm: Callback<String>,
+    on_open_file_confirm: Callback<String>,
     on_find_next: Callback<()>,
     on_find_prev: Callback<()>,
     on_replace_one: Callback<()>,
     on_replace_all: Callback<()>,
     on_slash_select: Callback<&'static str>,
 ) -> impl IntoView {
+    let open_filepath = RwSignal::new(String::new());
     let link_url = RwSignal::new(String::new());
     let link_text = RwSignal::new(String::new());
 
@@ -458,6 +460,66 @@ pub fn Modals(
                                 }
                             >
                                 "Create"
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            }.into_any(),
+
+            ActiveModal::OpenFile => view! {
+                <div class="modal-backdrop" on:click=move |_| active_modal.set(ActiveModal::None)>
+                    <div class="modal-dialog" on:click=move |ev| ev.stop_propagation()>
+                        <div class="modal-header">
+                            <h3>"Open Markdown File"</h3>
+                            <button type="button" class="modal-close-btn" on:click=move |_| active_modal.set(ActiveModal::None)>"×"</button>
+                        </div>
+                        <div class="modal-body">
+                            <label class="modal-label">"File Path or Name"</label>
+                            <input
+                                type="text"
+                                class="modal-input"
+                                placeholder="e.g. README.md or /path/to/file.md"
+                                prop:value=move || open_filepath.get()
+                                on:input=move |ev| open_filepath.set(event_target_value(&ev))
+                            />
+                            <div class="quick-file-suggestions" style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+                                <button
+                                    type="button"
+                                    class="sample-pill-btn"
+                                    on:click=move |_| open_filepath.set("README.md".to_string())
+                                >
+                                    "README.md"
+                                </button>
+                                <button
+                                    type="button"
+                                    class="sample-pill-btn"
+                                    on:click=move |_| open_filepath.set("Welcome.md".to_string())
+                                >
+                                    "Welcome.md"
+                                </button>
+                                <button
+                                    type="button"
+                                    class="sample-pill-btn"
+                                    on:click=move |_| open_filepath.set("Syntax-Guide.md".to_string())
+                                >
+                                    "Syntax-Guide.md"
+                                </button>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" on:click=move |_| active_modal.set(ActiveModal::None)>"Cancel"</button>
+                            <button
+                                type="button"
+                                class="btn btn-primary"
+                                on:click=move |_| {
+                                    let path = open_filepath.get();
+                                    if !path.trim().is_empty() {
+                                        on_open_file_confirm.run(path);
+                                        active_modal.set(ActiveModal::None);
+                                    }
+                                }
+                            >
+                                "Open File"
                             </button>
                         </div>
                     </div>

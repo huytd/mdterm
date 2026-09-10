@@ -1,6 +1,20 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::sync::Mutex;
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use tauri::{AppHandle, Emitter, State};
+
+pub struct PtySession {
+    master: Box<dyn MasterPty + Send>,
+    writer: Box<dyn Write + Send>,
+}
+
+#[derive(Default)]
+pub struct PtyState {
+    session: Mutex<Option<PtySession>>,
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct FileEntry {
@@ -120,6 +134,100 @@ fn export_document(path: String, content: String) -> Result<(), String> {
     write_file(path, content)
 }
 
+#[tauri::command]
+fn pty_spawn(app: AppHandle, state: State<PtyState>, cols: u16, rows: u16) -> Result<(), String> {
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: rows.max(1),
+            cols: cols.max(1),
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| format!("Failed to open PTY: {}", e))?;
+
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+    let mut cmd = CommandBuilder::new(&shell);
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
+    if let Ok(current_dir) = std::env::current_dir() {
+        cmd.cwd(current_dir);
+    }
+
+    let _child = pair.slave.spawn_command(cmd)
+        .map_err(|e| format!("Failed to spawn shell '{}': {}", shell, e))?;
+
+    // Drop slave in parent so EOF is triggered when shell exits
+    drop(pair.slave);
+
+    let mut reader = pair.master.try_clone_reader()
+        .map_err(|e| format!("Failed to clone reader: {}", e))?;
+    let writer = pair.master.take_writer()
+        .map_err(|e| format!("Failed to take writer: {}", e))?;
+
+    // Store in state
+    {
+        let mut sess = state.session.lock().map_err(|_| "Failed to lock PTY state".to_string())?;
+        *sess = Some(PtySession {
+            master: pair.master,
+            writer,
+        });
+    }
+
+    // Spawn reader thread
+    std::thread::spawn(move || {
+        let mut buffer = [0u8; 4096];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => {
+                    let _ = app.emit("pty-output", "\r\n[Process completed]\r\n");
+                    break;
+                }
+                Ok(n) => {
+                    let text = String::from_utf8_lossy(&buffer[..n]).to_string();
+                    let _ = app.emit("pty-output", text);
+                }
+                Err(e) => {
+                    log::warn!("PTY read error: {}", e);
+                    break;
+                }
+            }
+        }
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+fn pty_write(state: State<PtyState>, data: String) -> Result<(), String> {
+    let mut sess = state.session.lock().map_err(|_| "Lock error".to_string())?;
+    if let Some(session) = sess.as_mut() {
+        session.writer.write_all(data.as_bytes())
+            .map_err(|e| format!("Write error: {}", e))?;
+        session.writer.flush()
+            .map_err(|e| format!("Flush error: {}", e))?;
+        Ok(())
+    } else {
+        Err("No active PTY session".to_string())
+    }
+}
+
+#[tauri::command]
+fn pty_resize(state: State<PtyState>, cols: u16, rows: u16) -> Result<(), String> {
+    let sess = state.session.lock().map_err(|_| "Lock error".to_string())?;
+    if let Some(session) = sess.as_ref() {
+        session.master.resize(PtySize {
+            rows: rows.max(1),
+            cols: cols.max(1),
+            pixel_width: 0,
+            pixel_height: 0,
+        }).map_err(|e| format!("Resize error: {}", e))?;
+        Ok(())
+    } else {
+        Err("No active PTY session".to_string())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -128,6 +236,7 @@ pub fn run() {
                 .level(log::LevelFilter::Info)
                 .build(),
         )
+        .manage(PtyState::default())
         .invoke_handler(tauri::generate_handler![
             read_file,
             write_file,
@@ -137,7 +246,10 @@ pub fn run() {
             create_file,
             delete_file,
             rename_file,
-            export_document
+            export_document,
+            pty_spawn,
+            pty_write,
+            pty_resize
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
