@@ -297,11 +297,43 @@ html, body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+/* When editor is on the right (Default) */
+.app-workspace.pos-editor-right .terminal-pane-container {
+  order: 1;
+  border-left: none;
+  border-right: 1px solid var(--border-color);
+}
+
+.app-workspace.pos-editor-right .workspace-divider {
+  order: 2;
+}
+
+.app-workspace.pos-editor-right .editor-pane {
+  order: 3;
+  border-left: none;
+}
+
+/* When editor is on the left (Super key held on click) */
+.app-workspace.pos-editor-left .editor-pane {
+  order: 1;
+  border-left: none;
+}
+
+.app-workspace.pos-editor-left .workspace-divider {
+  order: 2;
+}
+
+.app-workspace.pos-editor-left .terminal-pane-container {
+  order: 3;
   border-left: 1px solid var(--border-color);
+  border-right: none;
 }
 
 .terminal-pane-container.full-width {
-  border-left: none;
+  border-left: none !important;
+  border-right: none !important;
   width: 100% !important;
 }
 

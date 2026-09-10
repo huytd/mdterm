@@ -55,6 +55,12 @@ impl Theme {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum EditorPosition {
+    Left,
+    Right,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SidebarTab {
     Files,

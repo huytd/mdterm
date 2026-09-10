@@ -9,7 +9,8 @@ show_help() {
 mdterm - Open Markdown files in mdterm WYSIWYG editor
 
 USAGE:
-    mdterm <file.md>          Open a file in mdterm editor
+    mdterm <file.md>          Open file on the right side (default)
+    mdterm --left <file.md>   Open file on the left side (or Super+Click in terminal)
     mdterm -                  Read markdown from stdin and open in editor
     cat file.md | mdterm      Pipe markdown into mdterm editor
     mdterm --setup-remote     Print shell script/function to use on remote SSH servers
@@ -26,7 +27,16 @@ show_remote_setup() {
     cat << 'REMOTE'
 # Add this function to your remote machine's ~/.bashrc or ~/.zshrc:
 mdterm() {
-  local f="$1"
+  local action="open"
+  local f=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --left|-l) action="open-left"; shift ;;
+      --right) action="open-right"; shift ;;
+      *) f="$1"; shift ;;
+    esac
+  done
+
   if [ -z "$f" ] || [ "$f" = "-" ]; then
     local content
     content=$(cat)
@@ -45,36 +55,54 @@ mdterm() {
 
   if [ -n "$TMUX" ]; then
     tmux set -p allow-passthrough on 2>/dev/null || true
-    printf "\033Ptmux;\033\033]5337;open;%s;%s;%s\007\033\\" "$nb64" "$pb64" "$cb64"
-    printf "\033]5337;open;%s;%s;%s\007" "$nb64" "$pb64" "$cb64"
+    printf "\033Ptmux;\033\033]5337;%s;%s;%s;%s\007\033\\" "$action" "$nb64" "$pb64" "$cb64"
+    printf "\033]5337;%s;%s;%s;%s\007" "$action" "$nb64" "$pb64" "$cb64"
   else
-    printf "\033]5337;open;%s;%s;%s\007" "$nb64" "$pb64" "$cb64"
+    printf "\033]5337;%s;%s;%s;%s\007" "$action" "$nb64" "$pb64" "$cb64"
   fi
-  printf "✓ Opened '%s' in mdterm editor\n" "${1:-stdin.md}"
+  printf "✓ Opened '%s' in mdterm editor\n" "${f:-stdin.md}"
 }
 REMOTE
 }
 
-if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
-    show_help
-    exit 0
-fi
+ACTION="open"
+TARGET=""
 
-if [ "$1" = "--setup-remote" ] || [ "$1" = "-r" ]; then
-    show_remote_setup
-    exit 0
-fi
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --help|-h)
+            show_help
+            exit 0
+            ;;
+        --setup-remote)
+            show_remote_setup
+            exit 0
+            ;;
+        --left|-l)
+            ACTION="open-left"
+            shift
+            ;;
+        --right)
+            ACTION="open-right"
+            shift
+            ;;
+        *)
+            TARGET="$1"
+            shift
+            ;;
+    esac
+done
 
 # Check if input is from pipe or stdin argument
-if [ "$1" = "-" ] || [ -z "$1" -a ! -t 0 ]; then
+if [ "$TARGET" = "-" ] || [ -z "$TARGET" -a ! -t 0 ]; then
     FILE_NAME="stdin.md"
     FILE_PATH="stdin.md"
     CONTENT=$(cat)
     NAME_B64=$(printf "%s" "$FILE_NAME" | base64 | tr -d '\r\n')
     PATH_B64=$(printf "%s" "$FILE_PATH" | base64 | tr -d '\r\n')
     CONTENT_B64=$(printf "%s" "$CONTENT" | base64 | tr -d '\r\n')
-elif [ -n "$1" ]; then
-    FILE="$1"
+elif [ -n "$TARGET" ]; then
+    FILE="$TARGET"
     if [ ! -f "$FILE" ]; then
         touch "$FILE" 2>/dev/null || true
     fi
@@ -97,11 +125,11 @@ if [ -n "$TMUX" ]; then
     tmux set -p allow-passthrough on 2>/dev/null || true
     tmux set -g allow-passthrough on 2>/dev/null || true
     # Emit DCS passthrough for tmux
-    printf "\033Ptmux;\033\033]5337;open;%s;%s;%s\007\033\\" "$NAME_B64" "$PATH_B64" "$CONTENT_B64"
+    printf "\033Ptmux;\033\033]5337;%s;%s;%s;%s\007\033\\" "$ACTION" "$NAME_B64" "$PATH_B64" "$CONTENT_B64"
     # Also emit direct OSC
-    printf "\033]5337;open;%s;%s;%s\007" "$NAME_B64" "$PATH_B64" "$CONTENT_B64"
+    printf "\033]5337;%s;%s;%s;%s\007" "$ACTION" "$NAME_B64" "$PATH_B64" "$CONTENT_B64"
 else
-    printf "\033]5337;open;%s;%s;%s\007" "$NAME_B64" "$PATH_B64" "$CONTENT_B64"
+    printf "\033]5337;%s;%s;%s;%s\007" "$ACTION" "$NAME_B64" "$PATH_B64" "$CONTENT_B64"
 fi
 
 printf "✓ Opened '%s' in mdterm editor\n" "$FILE_NAME"

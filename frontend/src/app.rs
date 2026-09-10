@@ -5,20 +5,21 @@ use web_sys::{KeyboardEvent, MouseEvent};
 use crate::components::samples::WELCOME_MD;
 use crate::components::{EditorHeader, FloatingControls, Modals, TerminalPane, WysiwygEditor};
 use crate::markdown::markdown_to_html;
-use crate::state::{ActiveModal, FindReplaceState, SlashMenuState, Theme};
+use crate::state::{ActiveModal, EditorPosition, FindReplaceState, SlashMenuState, Theme};
 use crate::tauri_bridge::{self, exec_editor_cmd, fit_terminal_session, window_find};
 
 #[component]
 pub fn App() -> impl IntoView {
     // 1. Core State
     let is_editor_open = RwSignal::new(false);
+    let editor_position = RwSignal::new(EditorPosition::Right);
     let active_filename = RwSignal::new(String::from("Untitled.md"));
     let active_path = RwSignal::new(None::<String>);
     let active_content = RwSignal::new(WELCOME_MD.to_string());
     let is_dirty = RwSignal::new(false);
     let current_theme = RwSignal::new(Theme::Dark);
 
-    // Split ratio between Editor (left) and Terminal (right)
+    // Split ratio: width percentage of the editor pane (20% - 80%, default 50%)
     let split_ratio = RwSignal::new(50.0f64);
     let is_dragging = RwSignal::new(false);
 
@@ -27,7 +28,7 @@ pub fn App() -> impl IntoView {
     let find_replace = RwSignal::new(FindReplaceState::default());
     let slash_menu = RwSignal::new(SlashMenuState::default());
 
-    // Listen for file open requests triggered from terminal (OSC 5337 / mdterm CLI)
+    // Listen for file open requests triggered from terminal (OSC 5337 / mdterm CLI / click)
     Effect::new(move |_| {
         if let Some(win) = web_sys::window() {
             let cb = wasm_bindgen::closure::Closure::wrap(Box::new(move |ev: web_sys::CustomEvent| {
@@ -44,10 +45,15 @@ pub fn App() -> impl IntoView {
                         .ok()
                         .and_then(|v| v.as_string())
                         .unwrap_or_default();
+                    let side = js_sys::Reflect::get(&detail, &"side".into())
+                        .ok()
+                        .and_then(|v| v.as_string())
+                        .unwrap_or_else(|| "right".to_string());
 
                     active_filename.set(name);
                     active_path.set(path.clone());
                     is_dirty.set(false);
+                    editor_position.set(if side == "left" { EditorPosition::Left } else { EditorPosition::Right });
                     is_editor_open.set(true);
                     fit_terminal_session();
 
@@ -114,11 +120,12 @@ pub fn App() -> impl IntoView {
     });
 
     // New Document
-    let handle_new_file = Callback::new(move |_| {
+    let handle_new_file = Callback::new(move |open_on_left: bool| {
         active_filename.set("Untitled.md".to_string());
         active_path.set(None);
         active_content.set("# Untitled Document\n\nStart typing here...".to_string());
         is_dirty.set(false);
+        editor_position.set(if open_on_left { EditorPosition::Left } else { EditorPosition::Right });
         is_editor_open.set(true);
         fit_terminal_session();
     });
@@ -286,11 +293,16 @@ pub fn App() -> impl IntoView {
                 }
                 "o" => {
                     ev.prevent_default();
+                    if ev.meta_key() {
+                        editor_position.set(EditorPosition::Left);
+                    } else {
+                        editor_position.set(EditorPosition::Right);
+                    }
                     active_modal.set(ActiveModal::OpenFile);
                 }
                 "n" => {
                     ev.prevent_default();
-                    handle_new_file.run(());
+                    handle_new_file.run(ev.meta_key());
                 }
                 "f" => {
                     ev.prevent_default();
@@ -318,8 +330,12 @@ pub fn App() -> impl IntoView {
                 let inner_width = win.inner_width().ok().and_then(|w| w.as_f64()).unwrap_or(1200.0);
                 let client_x = ev.client_x() as f64;
                 let pct = (client_x / inner_width) * 100.0;
-                let clamped = pct.clamp(20.0, 80.0);
-                split_ratio.set(clamped);
+                let new_split = if editor_position.get() == EditorPosition::Left {
+                    pct.clamp(20.0, 80.0)
+                } else {
+                    (100.0 - pct).clamp(20.0, 80.0)
+                };
+                split_ratio.set(new_split);
                 fit_terminal_session();
             }
         }
@@ -340,7 +356,13 @@ pub fn App() -> impl IntoView {
             on:keydown=on_window_keydown
             tabindex="0"
         >
-            <div class="app-workspace">
+            <div class=move || {
+                if editor_position.get() == EditorPosition::Left {
+                    "app-workspace pos-editor-left"
+                } else {
+                    "app-workspace pos-editor-right"
+                }
+            }>
                 {move || if is_editor_open.get() {
                     view! {
                         <div
@@ -351,6 +373,7 @@ pub fn App() -> impl IntoView {
                                 active_filename=active_filename.into()
                                 is_dirty=is_dirty.into()
                                 current_theme=current_theme
+                                editor_position=editor_position
                                 on_close_editor=handle_close_editor
                                 on_save_file=Callback::new(move |_| save_active_document())
                                 on_export=Callback::new(move |_| active_modal.set(ActiveModal::Export))
@@ -380,7 +403,10 @@ pub fn App() -> impl IntoView {
                         <FloatingControls
                             current_theme=current_theme
                             on_new_file=handle_new_file
-                            on_open_file=Callback::new(move |_| active_modal.set(ActiveModal::OpenFile))
+                            on_open_file=Callback::new(move |open_on_left: bool| {
+                                editor_position.set(if open_on_left { EditorPosition::Left } else { EditorPosition::Right });
+                                active_modal.set(ActiveModal::OpenFile);
+                            })
                         />
                     }.into_any()
                 }}

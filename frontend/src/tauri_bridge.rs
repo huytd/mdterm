@@ -143,27 +143,36 @@ export function initTerminalSession(containerId) {
         }, 3500);
     };
 
-    // Handler for OSC escape sequences: \x1b]5337;open;NAME_B64;PATH_B64;CONTENT_B64\x07
+    // Handler for OSC escape sequences: \x1b]5337;open;NAME_B64;PATH_B64;CONTENT_B64[;SIDE]\x07
     const handleOpenOsc = (data) => {
         try {
             const parts = data.split(';');
             const action = parts[0];
-            if (action === 'open' || action === 'open-content') {
+            let side = 'right';
+            if (action.endsWith('-left')) {
+                side = 'left';
+            } else if (action.endsWith('-right')) {
+                side = 'right';
+            } else if (parts[4] && parts[4].toLowerCase() === 'left') {
+                side = 'left';
+            }
+
+            if (action.startsWith('open') || action.startsWith('open-content')) {
                 const name = decodeB64(parts[1]) || 'document.md';
                 const path = decodeB64(parts[2]);
                 const content = decodeB64(parts[3]);
 
-                showToast("Opened '" + name + "' from terminal");
+                showToast("Opened '" + name + "' in editor (" + side + ")");
                 window.dispatchEvent(new CustomEvent('mdterm-open-file', {
-                    detail: { name, path, content }
+                    detail: { name, path, content, side }
                 }));
                 return true;
-            } else if (action === 'open-file') {
+            } else if (action.startsWith('open-file')) {
                 const path = parts.slice(1).join(';');
                 const name = path.split('/').pop() || path;
-                showToast("Opened '" + name + "' from terminal");
+                showToast("Opened '" + name + "' in editor (" + side + ")");
                 window.dispatchEvent(new CustomEvent('mdterm-open-file', {
-                    detail: { name, path, content: '' }
+                    detail: { name, path, content: '', side }
                 }));
                 return true;
             }
@@ -182,7 +191,7 @@ export function initTerminalSession(containerId) {
     const hasTauri = !!(window.__TAURI__ && window.__TAURI__.core);
 
     // Clickable file opening handler
-    const handleTerminalFileClick = async (clickedPath) => {
+    const handleTerminalFileClick = async (clickedPath, event) => {
         if (!clickedPath) return;
 
         let cleanPath = clickedPath.trim().replace(/^['"`]+|['"`]+$/g, '');
@@ -192,6 +201,17 @@ export function initTerminalSession(containerId) {
         }
 
         const filename = cleanPath.split('/').pop() || cleanPath;
+
+        // Detect if user held Super (Meta / Windows / Command) during click
+        const isSuper = !!(event && (
+            event.metaKey ||
+            (typeof event.getModifierState === 'function' && (
+                event.getModifierState('Meta') ||
+                event.getModifierState('Super') ||
+                event.getModifierState('OS')
+            ))
+        ));
+        const side = isSuper ? 'left' : 'right';
 
         if (hasTauri) {
             const invoke = window.__TAURI__.core.invoke;
@@ -215,9 +235,9 @@ export function initTerminalSession(containerId) {
 
                 // Try reading file locally
                 const content = await invoke('read_file', { path: resolvedPath });
-                showToast("Opened '" + filename + "' in editor");
+                showToast("Opened '" + filename + "' (" + side + ")");
                 window.dispatchEvent(new CustomEvent('mdterm-open-file', {
-                    detail: { name: filename, path: resolvedPath, content }
+                    detail: { name: filename, path: resolvedPath, content, side }
                 }));
                 return;
             } catch (e) {
@@ -226,13 +246,14 @@ export function initTerminalSession(containerId) {
             }
 
             // Fallback for remote SSH / tmux: invoke mdterm in terminal
-            showToast("Opening '" + filename + "' from terminal...");
-            invoke('pty_write', { data: 'mdterm "' + cleanPath + '"\n' }).catch(() => {});
+            showToast("Opening '" + filename + "' (" + side + ")...");
+            const flag = isSuper ? '--left ' : '';
+            invoke('pty_write', { data: 'mdterm ' + flag + '"' + cleanPath + '"\n' }).catch(() => {});
         } else {
             // Browser preview mode
-            showToast("Opened '" + filename + "' in demo editor");
+            showToast("Opened '" + filename + "' (" + side + ")");
             window.dispatchEvent(new CustomEvent('mdterm-open-file', {
-                detail: { name: filename, path: cleanPath, content: '# ' + filename + '\n\nOpened via terminal click.' }
+                detail: { name: filename, path: cleanPath, content: '# ' + filename + '\n\nOpened via terminal click.', side }
             }));
         }
     };
@@ -281,7 +302,7 @@ export function initTerminalSession(containerId) {
                         },
                         text: rawPath,
                         activate: async (event, clickedText) => {
-                            await handleTerminalFileClick(clickedText);
+                            await handleTerminalFileClick(clickedText, event);
                         }
                     });
 

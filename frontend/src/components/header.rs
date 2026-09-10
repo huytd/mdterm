@@ -1,11 +1,12 @@
 use leptos::prelude::*;
-use crate::state::Theme;
+use crate::state::{EditorPosition, Theme};
 
 #[component]
 pub fn EditorHeader(
     active_filename: Signal<String>,
     is_dirty: Signal<bool>,
     current_theme: RwSignal<Theme>,
+    editor_position: RwSignal<EditorPosition>,
     on_close_editor: Callback<()>,
     on_save_file: Callback<()>,
     on_export: Callback<()>,
@@ -26,6 +27,29 @@ pub fn EditorHeader(
             </div>
 
             <div class="tab-actions">
+                <button
+                    type="button"
+                    class="tab-btn"
+                    title=move || if editor_position.get() == EditorPosition::Left {
+                        "Move editor to right side"
+                    } else {
+                        "Move editor to left side"
+                    }
+                    on:click=move |_| {
+                        editor_position.update(|p| *p = match *p {
+                            EditorPosition::Left => EditorPosition::Right,
+                            EditorPosition::Right => EditorPosition::Left,
+                        });
+                        crate::tauri_bridge::fit_terminal_session();
+                    }
+                >
+                    <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="8 7 4 11 8 15"></polyline>
+                        <polyline points="16 7 20 11 16 15"></polyline>
+                        <line x1="4" y1="11" x2="20" y2="11"></line>
+                    </svg>
+                </button>
+
                 <button
                     type="button"
                     class="tab-btn"
@@ -83,16 +107,19 @@ pub fn EditorHeader(
 #[component]
 pub fn FloatingControls(
     current_theme: RwSignal<Theme>,
-    on_new_file: Callback<()>,
-    on_open_file: Callback<()>,
+    on_new_file: Callback<bool>,
+    on_open_file: Callback<bool>,
 ) -> impl IntoView {
     view! {
         <div class="floating-terminal-bar">
             <button
                 type="button"
                 class="float-btn"
-                title="New Document (Ctrl+N)"
-                on:click=move |_| on_new_file.run(())
+                title="New Document (Ctrl+N, Super+Click for left)"
+                on:click=move |ev: web_sys::MouseEvent| {
+                    let is_super = ev.meta_key();
+                    on_new_file.run(is_super);
+                }
             >
                 <svg class="float-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -103,8 +130,11 @@ pub fn FloatingControls(
             <button
                 type="button"
                 class="float-btn"
-                title="Open Document (Ctrl+O)"
-                on:click=move |_| on_open_file.run(())
+                title="Open Document (Ctrl+O, Super+Click for left)"
+                on:click=move |ev: web_sys::MouseEvent| {
+                    let is_super = ev.meta_key();
+                    on_open_file.run(is_super);
+                }
             >
                 <svg class="float-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
