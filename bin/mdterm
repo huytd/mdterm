@@ -93,8 +93,59 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# Check if input is from pipe or stdin argument
-if [ "$TARGET" = "-" ] || [ -z "$TARGET" -a ! -t 0 ]; then
+find_gui_binary() {
+    if [ -x "/usr/bin/mdterm" ] && [ ! "/usr/bin/mdterm" -ef "$0" ]; then
+        echo "/usr/bin/mdterm"
+        return 0
+    fi
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [ -x "$script_dir/../target/release/mdterm" ] && [ ! "$script_dir/../target/release/mdterm" -ef "$0" ]; then
+        echo "$script_dir/../target/release/mdterm"
+        return 0
+    fi
+    local bin
+    while IFS= read -r bin; do
+        if [ -x "$bin" ] && [ ! "$bin" -ef "$0" ]; then
+            if file -b "$bin" 2>/dev/null | grep -qv "shell script"; then
+                echo "$bin"
+                return 0
+            fi
+        fi
+    done < <(which -a mdterm 2>/dev/null)
+    return 1
+}
+
+# Determine execution environment
+IS_INSIDE_MDTERM=false
+if [ -n "$MDTERM" ] || [ "$TERM_PROGRAM" = "mdterm" ]; then
+    IS_INSIDE_MDTERM=true
+elif [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_CLIENT" ] || [ -n "$SSH_TTY" ]; then
+    IS_INSIDE_MDTERM=true
+fi
+
+# Detect actual piped or redirected input (not /dev/null from GUI launcher)
+HAS_STDIN_DATA=false
+if [ "$TARGET" = "-" ]; then
+    HAS_STDIN_DATA=true
+elif [ -z "$TARGET" ] && [ ! -t 0 ] && [ ! -c /dev/stdin ]; then
+    HAS_STDIN_DATA=true
+fi
+
+# If outside mdterm and not piping data, delegate to GUI application if available
+if [ "$IS_INSIDE_MDTERM" = false ] && [ "$HAS_STDIN_DATA" = false ]; then
+    GUI_BIN=$(find_gui_binary || true)
+    if [ -n "$GUI_BIN" ] && [ -x "$GUI_BIN" ]; then
+        if [ -n "$TARGET" ]; then
+            exec "$GUI_BIN" "$TARGET"
+        else
+            exec "$GUI_BIN"
+        fi
+    fi
+fi
+
+# Process input for mdterm OSC escape sequence
+if [ "$HAS_STDIN_DATA" = true ]; then
     FILE_NAME="stdin.md"
     FILE_PATH="stdin.md"
     CONTENT=$(cat)
@@ -117,7 +168,7 @@ elif [ -n "$TARGET" ]; then
     fi
 else
     show_help
-    exit 1
+    exit 0
 fi
 
 # Transmit escape sequence to terminal

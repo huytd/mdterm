@@ -97,15 +97,98 @@ trunk serve
 ### Building for Production
 
 ```bash
-# 1. Build the optimized WebAssembly frontend:
-cd frontend
-trunk build --release
-
-# 2. Build the native Linux release binary:
+# Build standalone release binary:
 cargo build --package mdterm --bin mdterm --release
 
-# The compiled standalone desktop executable will be located at:
+# Standalone desktop executable will be located at:
 # ./target/release/mdterm
+```
+
+### Building Installer Bundles (Linux & macOS)
+
+`cargo tauri build` automatically compiles the WebAssembly frontend via Trunk and creates native installer bundles.
+
+#### Linux (.deb package)
+
+```bash
+# 1. Install build dependencies on Ubuntu/Debian:
+sudo apt-get update && sudo apt-get install -y \
+  libwebkit2gtk-4.1-dev \
+  build-essential \
+  curl \
+  wget \
+  file \
+  libssl-dev \
+  libayatana-appindicator3-dev \
+  librsvg2-dev
+
+# 2. Build the .deb installer package:
+cargo tauri build --bundles deb
+
+# Output located at:
+# ./target/release/bundle/deb/mdterm_0.1.0_amd64.deb
+```
+
+#### macOS (.dmg installer)
+
+```bash
+# Build DMG for current architecture:
+cargo tauri build --bundles dmg
+
+# Or build Universal DMG (Apple Silicon M-series + Intel x86_64):
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+cargo tauri build --target universal-apple-darwin
+
+# Output located at:
+# ./target/release/bundle/dmg/*.dmg
+# (or ./target/universal-apple-darwin/release/bundle/dmg/*.dmg)
+```
+
+---
+
+### Installing the Application
+
+#### On Linux (via `dpkg`)
+
+Install the generated `.deb` package using `dpkg`:
+
+```bash
+# 1. Install the Debian package:
+sudo dpkg -i target/release/bundle/deb/*.deb
+
+# If any shared library dependencies are missing, fix them with:
+sudo apt-get install -f
+
+# 2. (Optional) Install the mdterm CLI tool to your PATH:
+sudo cp bin/mdterm /usr/local/bin/mdterm
+sudo chmod +x /usr/local/bin/mdterm
+```
+
+#### On macOS (via DMG)
+
+You can install the app either using Finder (GUI) or directly from the terminal (CLI):
+
+**Option A: Using Finder / GUI**
+```bash
+# Open the DMG image in Finder:
+open target/release/bundle/dmg/*.dmg
+# (or target/universal-apple-darwin/release/bundle/dmg/*.dmg)
+```
+Drag **mdterm.app** into the **Applications** folder.
+
+**Option B: Using Terminal (`hdiutil`)**
+```bash
+# 1. Mount the DMG image:
+hdiutil attach target/release/bundle/dmg/*.dmg
+
+# 2. Copy mdterm.app into /Applications:
+cp -R /Volumes/mdterm*/mdterm.app /Applications/
+
+# 3. Unmount the DMG:
+hdiutil detach /Volumes/mdterm*
+
+# 4. (Optional) Create a symlink to use `mdterm` from any terminal:
+sudo ln -sf /Applications/mdterm.app/Contents/MacOS/mdterm /usr/local/bin/mdterm
 ```
 
 ---

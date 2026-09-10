@@ -6,7 +6,7 @@ use crate::components::samples::WELCOME_MD;
 use crate::components::{EditorHeader, FloatingControls, Modals, TerminalPane, WysiwygEditor};
 use crate::markdown::markdown_to_html;
 use crate::state::{ActiveModal, EditorPosition, FindReplaceState, SlashMenuState, Theme};
-use crate::tauri_bridge::{self, exec_editor_cmd, fit_terminal_session, set_terminal_theme, window_find};
+use crate::tauri_bridge::{self, exec_editor_cmd, fit_terminal_session, focus_terminal_session, set_terminal_theme, window_find};
 
 #[component]
 pub fn App() -> impl IntoView {
@@ -81,6 +81,26 @@ pub fn App() -> impl IntoView {
         }
     });
 
+    // Open file passed via command line / file manager association
+    Effect::new(move |_| {
+        leptos::task::spawn_local(async move {
+            if let Ok(Some(file_path)) = tauri_bridge::get_cli_file().await {
+                let name = std::path::Path::new(&file_path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "document.md".to_string());
+                if let Ok(disk_content) = tauri_bridge::read_file(&file_path).await {
+                    active_filename.set(name);
+                    active_path.set(Some(file_path));
+                    active_content.set(disk_content);
+                    is_dirty.set(false);
+                    is_editor_open.set(true);
+                    fit_terminal_session();
+                }
+            }
+        });
+    });
+
     // Handle content updates from editor
     let handle_content_change = Callback::new(move |new_text: String| {
         active_content.set(new_text);
@@ -140,6 +160,7 @@ pub fn App() -> impl IntoView {
     let handle_close_editor = Callback::new(move |_| {
         is_editor_open.set(false);
         fit_terminal_session();
+        focus_terminal_session();
     });
 
 
@@ -396,7 +417,7 @@ pub fn App() -> impl IntoView {
             on:mousemove=on_mouse_move
             on:mouseup=on_mouse_up
             on:keydown=on_window_keydown
-            tabindex="0"
+            tabindex="-1"
         >
             <div class=move || {
                 if editor_position.get() == EditorPosition::Left {

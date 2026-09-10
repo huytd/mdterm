@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
@@ -136,6 +136,23 @@ fn export_document(path: String, content: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn get_cli_file() -> Option<String> {
+    let args: Vec<String> = std::env::args().collect();
+    for arg in args.into_iter().skip(1) {
+        if !arg.starts_with('-') {
+            let path = PathBuf::from(&arg);
+            if path.exists() {
+                if let Ok(abs) = fs::canonicalize(&path) {
+                    return Some(abs.to_string_lossy().to_string());
+                }
+                return Some(arg);
+            }
+        }
+    }
+    None
+}
+
+#[tauri::command]
 fn pty_spawn(app: AppHandle, state: State<PtyState>, cols: u16, rows: u16) -> Result<(), String> {
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -151,6 +168,8 @@ fn pty_spawn(app: AppHandle, state: State<PtyState>, cols: u16, rows: u16) -> Re
     let mut cmd = CommandBuilder::new(&shell);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
+    cmd.env("MDTERM", "1");
+    cmd.env("TERM_PROGRAM", "mdterm");
 
     let existing_path = std::env::var("PATH").unwrap_or_default();
     let home_bin = dirs::home_dir()
@@ -283,6 +302,12 @@ pub fn run() {
                 .level(log::LevelFilter::Info)
                 .build(),
         )
+        .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_focus();
+            }
+            Ok(())
+        })
         .manage(PtyState::default())
         .invoke_handler(tauri::generate_handler![
             read_file,
@@ -297,7 +322,8 @@ pub fn run() {
             pty_spawn,
             pty_get_cwd,
             pty_write,
-            pty_resize
+            pty_resize,
+            get_cli_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

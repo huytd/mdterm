@@ -289,11 +289,64 @@ export function initTerminalSession(containerId) {
     }
 
     term.open(container);
+
+    const focusTerm = () => {
+        try {
+            const active = document.activeElement;
+            const isEditorActive = active && (
+                active.closest('.editor-pane') ||
+                active.closest('.modal-content') ||
+                active.tagName === 'INPUT' ||
+                (active.tagName === 'TEXTAREA' && !active.classList.contains('xterm-helper-textarea')) ||
+                active.getAttribute('contenteditable') === 'true'
+            );
+            if (isEditorActive) {
+                return;
+            }
+            if (typeof window !== 'undefined' && typeof window.focus === 'function') {
+                window.focus();
+            }
+            term.focus();
+            const textarea = container.querySelector('.xterm-helper-textarea');
+            if (textarea && document.activeElement !== textarea) {
+                textarea.focus({ preventScroll: true });
+            }
+        } catch (e) {}
+    };
+
+    // Immediate & staggered focus to ensure terminal is active upon app start
+    focusTerm();
+    if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(focusTerm);
+    }
     setTimeout(() => {
         if (fitAddon) {
             try { fitAddon.fit(); } catch (e) {}
         }
+        focusTerm();
     }, 60);
+    setTimeout(focusTerm, 150);
+    setTimeout(focusTerm, 300);
+    setTimeout(focusTerm, 600);
+
+    // Clicking anywhere in the container or terminal pane focuses the terminal
+    const handlePaneClick = () => {
+        const sel = window.getSelection ? window.getSelection().toString() : '';
+        if (!sel || sel.length === 0) {
+            focusTerm();
+        }
+    };
+    container.addEventListener('click', handlePaneClick);
+    const pane = container.closest('.terminal-pane') || container.parentElement;
+    if (pane && pane !== container) {
+        pane.addEventListener('click', handlePaneClick);
+    }
+
+    // Auto-focus terminal on window focus if no editor/modal is active
+    const handleWindowFocus = () => {
+        focusTerm();
+    };
+    window.addEventListener('focus', handleWindowFocus);
 
     // Decode UTF-8 string from Base64
     const decodeB64 = (str) => {
@@ -602,6 +655,21 @@ export function fitTerminalSession() {
     setTimeout(doFit, 50);
     setTimeout(doFit, 150);
 }
+
+export function focusTerminalSession() {
+    if (window._mdtermTerminal) {
+        try {
+            if (typeof window !== 'undefined' && typeof window.focus === 'function') {
+                window.focus();
+            }
+            window._mdtermTerminal.focus();
+            const textarea = document.querySelector('.terminal-container .xterm-helper-textarea');
+            if (textarea && document.activeElement !== textarea) {
+                textarea.focus({ preventScroll: true });
+            }
+        } catch (e) {}
+    }
+}
 "#)]
 extern "C" {
     #[wasm_bindgen(catch)]
@@ -637,6 +705,9 @@ extern "C" {
 
     #[wasm_bindgen(js_name = fitTerminalSession)]
     pub fn fit_terminal_session();
+
+    #[wasm_bindgen(js_name = focusTerminalSession)]
+    pub fn focus_terminal_session();
 }
 
 pub async fn read_file(path: &str) -> Result<String, String> {
@@ -718,6 +789,20 @@ pub async fn get_current_dir() -> Result<String, String> {
             .map_err(|e| format!("Failed to parse response: {:?}", e))
     } else {
         Ok("Documents".to_string())
+    }
+}
+
+pub async fn get_cli_file() -> Result<Option<String>, String> {
+    if is_tauri_env() {
+        let args = serde_wasm_bindgen::to_value(&json!({}))
+            .map_err(|e| format!("Failed to serialize args: {:?}", e))?;
+        let res = tauriInvoke("get_cli_file", args)
+            .await
+            .map_err(|e| format!("Invoke error: {:?}", e))?;
+        serde_wasm_bindgen::from_value(res)
+            .map_err(|e| format!("Failed to parse response: {:?}", e))
+    } else {
+        Ok(None)
     }
 }
 
