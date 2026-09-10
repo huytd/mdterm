@@ -339,6 +339,65 @@ export function initTerminalSession(containerId) {
 
     term.open(container);
 
+    const tauriInvoke = window.__TAURI__ && window.__TAURI__.core
+        ? window.__TAURI__.core.invoke
+        : null;
+    const hasTauri = typeof tauriInvoke === 'function';
+
+    const writeClipboardText = async (text) => {
+        if (hasTauri) {
+            await tauriInvoke('plugin:clipboard-manager|write_text', { text });
+            return;
+        }
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+            await navigator.clipboard.writeText(text);
+        }
+    };
+
+    const readClipboardText = async () => {
+        if (hasTauri) {
+            return await tauriInvoke('plugin:clipboard-manager|read_text');
+        }
+        if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
+            return await navigator.clipboard.readText();
+        }
+        return '';
+    };
+
+    // Use native terminal shortcuts so copy/paste works independently of WebView permissions.
+    const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || '');
+    term.attachCustomKeyEventHandler((event) => {
+        if (event.type !== 'keydown') return true;
+
+        const key = event.key.toLowerCase();
+        const copyShortcut = (isMac && event.metaKey && key === 'c') ||
+            (!isMac && event.ctrlKey && event.shiftKey && key === 'c') ||
+            (event.ctrlKey && key === 'insert');
+        const pasteShortcut = (isMac && event.metaKey && key === 'v') ||
+            (!isMac && event.ctrlKey && event.shiftKey && key === 'v') ||
+            (event.shiftKey && key === 'insert');
+
+        if (copyShortcut && term.hasSelection()) {
+            writeClipboardText(term.getSelection()).catch((error) => {
+                console.error('Failed to copy terminal selection:', error);
+            });
+            return false;
+        }
+
+        if (pasteShortcut) {
+            readClipboardText()
+                .then((text) => {
+                    if (text) term.paste(text);
+                })
+                .catch((error) => {
+                    console.error('Failed to paste into terminal:', error);
+                });
+            return false;
+        }
+
+        return true;
+    });
+
     const focusTerm = () => {
         try {
             const active = document.activeElement;
@@ -486,9 +545,28 @@ export function initTerminalSession(containerId) {
         term.parser.registerOscHandler(5337, handleOpenOsc);
         term.parser.registerOscHandler(7777, handleOpenOsc);
         term.parser.registerOscHandler(1337, handleOpenOsc);
-    }
 
-    const hasTauri = !!(window.__TAURI__ && window.__TAURI__.core);
+        // OSC 52: applications such as tmux use this sequence to copy to the host clipboard.
+        term.parser.registerOscHandler(52, (data) => {
+            try {
+                const separator = data.indexOf(';');
+                if (separator < 0) return false;
+
+                const encodedText = data.slice(separator + 1);
+                // Clipboard reads over OSC 52 are deliberately ignored; paste remains user-initiated.
+                if (!encodedText || encodedText === '?') return true;
+
+                const text = decodeB64(encodedText);
+                writeClipboardText(text).catch((error) => {
+                    console.error('Failed to handle OSC 52 clipboard write:', error);
+                });
+                return true;
+            } catch (error) {
+                console.error('Invalid OSC 52 clipboard sequence:', error);
+                return false;
+            }
+        });
+    }
 
     // Clickable file opening handler
     const handleTerminalFileClick = async (clickedPath, event) => {
