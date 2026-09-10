@@ -7,32 +7,42 @@ set -e
 show_help() {
     cat << 'HELP'
 mdterm - Open Markdown files in mdterm WYSIWYG editor
+Works locally, over SSH, and inside tmux!
 
 USAGE:
     mdterm <file.md>          Open file on the right side (default)
     mdterm --left <file.md>   Open file on the left side (or Super+Click in terminal)
+    mdterm --no-wait <file>   Open file without waiting for remote saves
+    mdterm --wait <file>      Wait for editor saves (default over SSH)
     mdterm -                  Read markdown from stdin and open in editor
     cat file.md | mdterm      Pipe markdown into mdterm editor
-    mdterm --setup-remote     Print shell script/function to use on remote SSH servers
+    mdterm --setup-remote [shell] Print shell function for remote servers (bash or fish)
     mdterm --help             Show this help message
 
 COMPATIBILITY:
     • Local: Works directly in the mdterm terminal pane
-    • SSH: Transmits file content over terminal stream via OSC escape sequences
+    • SSH: Transmits and saves file content over terminal stream (zero remote binaries needed)
     • Tmux: Uses tmux DCS passthrough (auto-enables allow-passthrough)
+    • Shells: Supports Bash, Zsh, and Fish shells
 HELP
 }
 
-show_remote_setup() {
-    cat << 'REMOTE'
+show_bash_remote_setup() {
+    cat << 'BASH_REMOTE'
+# ============================================================
+# Bash / Zsh Setup (Remote SSH Server)
 # Add this function to your remote machine's ~/.bashrc or ~/.zshrc:
+# ============================================================
 mdterm() {
-  local action="open"
+  local action="open-remote"
   local f=""
+  local wait_mode=true
   while [ $# -gt 0 ]; do
     case "$1" in
-      --left|-l) action="open-left"; shift ;;
-      --right) action="open-right"; shift ;;
+      --left|-l) action="open-remote-left"; shift ;;
+      --right) action="open-remote-right"; shift ;;
+      --no-wait|-n) wait_mode=false; shift ;;
+      --wait|-w) wait_mode=true; shift ;;
       *) f="$1"; shift ;;
     esac
   done
@@ -44,6 +54,7 @@ mdterm() {
     nb64=$(printf "%s" "stdin.md" | base64 | tr -d '\r\n')
     pb64=$(printf "%s" "stdin.md" | base64 | tr -d '\r\n')
     cb64=$(printf "%s" "$content" | base64 | tr -d '\r\n')
+    wait_mode=false
   else
     if [ ! -f "$f" ]; then touch "$f" 2>/dev/null || true; fi
     local nb64 pb64 cb64
@@ -60,13 +71,189 @@ mdterm() {
   else
     printf "\033]5337;%s;%s;%s;%s\007" "$action" "$nb64" "$pb64" "$cb64"
   fi
-  printf "✓ Opened '%s' in mdterm editor\n" "${f:-stdin.md}"
+
+  if [ "$wait_mode" = true ]; then
+    printf "✓ Opened '%s' in mdterm editor\n" "$f"
+    printf "  [Remote edit session] Press Ctrl+S in editor to save, Enter or Ctrl+C to close\n"
+    trap 'stty echo 2>/dev/null || true; printf "\n"' EXIT INT TERM
+    stty -echo 2>/dev/null || true
+    while true; do
+      if ! IFS= read -r line; then
+        break
+      fi
+      line="${line%$'\r'}"
+      case "$line" in
+        __MDTERM_SAVE__:*)
+          local payload="${line#__MDTERM_SAVE__:}"
+          local save_content_b64="${payload#*:}"
+          if [ -n "$save_content_b64" ]; then
+            printf "%s" "$save_content_b64" | tr -d '\r\n' | base64 -d > "$f" 2>/dev/null || \
+            printf "%s" "$save_content_b64" | tr -d '\r\n' | base64 -D > "$f" 2>/dev/null || true
+            if [ -n "$TMUX" ]; then
+              printf "\033Ptmux;\033\033]5337;saved;%s\007\033\\" "$nb64"
+              printf "\033]5337;saved;%s\007" "$nb64"
+            else
+              printf "\033]5337;saved;%s\007" "$nb64"
+            fi
+            printf "  ✓ [%s] Saved '%s'\n" "$(date +%T)" "$f"
+          fi
+          ;;
+        __MDTERM_CLOSE__*)
+          printf "  ✓ Closed '%s' in mdterm editor\n" "$f"
+          break
+          ;;
+        *)
+          printf "  ✓ Exited mdterm remote session\n"
+          break
+          ;;
+      esac
+    done
+    stty echo 2>/dev/null || true
+    trap - EXIT INT TERM
+  else
+    printf "✓ Opened '%s' in mdterm editor\n" "${f:-stdin.md}"
+  fi
 }
-REMOTE
+BASH_REMOTE
+}
+
+show_fish_remote_setup() {
+    cat << 'FISH_REMOTE'
+# ============================================================
+# Fish Shell Setup (Remote SSH Server)
+# Save this in ~/.config/fish/functions/mdterm.fish
+# (or append to ~/.config/fish/config.fish):
+# ============================================================
+function mdterm --description "Open Markdown in mdterm WYSIWYG editor"
+    set -l action "open-remote"
+    set -l f ""
+    set -l wait_mode true
+
+    set -l i 1
+    while test $i -le (count $argv)
+        switch $argv[$i]
+            case -l --left
+                set action "open-remote-left"
+            case --right
+                set action "open-remote-right"
+            case -n --no-wait
+                set wait_mode false
+            case -w --wait
+                set wait_mode true
+            case -h --help
+                echo "Usage: mdterm [options] <file.md>"
+                echo "Options:"
+                echo "  -l, --left     Open editor on left side"
+                echo "  --right        Open editor on right side"
+                echo "  -n, --no-wait  Do not wait for remote saves"
+                echo "  -w, --wait     Wait for editor saves (default)"
+                echo "  -h, --help     Show this help"
+                return 0
+            case '*'
+                set f $argv[$i]
+        end
+        set i (math $i + 1)
+    end
+
+    set -l nb64 ""
+    set -l pb64 ""
+    set -l cb64 ""
+
+    if test -z "$f" -o "$f" = "-"
+        set nb64 (printf "stdin.md" | base64 | string replace -a -r '[\r\n]' '')
+        set pb64 (printf "stdin.md" | base64 | string replace -a -r '[\r\n]' '')
+        set cb64 (cat | base64 | string replace -a -r '[\r\n]' '')
+        set wait_mode false
+    else
+        if not test -f "$f"
+            touch "$f" 2>/dev/null; or true
+        end
+        set -l fname (basename "$f")
+        set -l fpath (realpath "$f" 2>/dev/null; or echo "$f")
+        set nb64 (printf "%s" "$fname" | base64 | string replace -a -r '[\r\n]' '')
+        set pb64 (printf "%s" "$fpath" | base64 | string replace -a -r '[\r\n]' '')
+        if test -f "$f"
+            set cb64 (base64 "$f" 2>/dev/null | string replace -a -r '[\r\n]' '')
+        end
+    end
+
+    if set -q TMUX
+        tmux set -p allow-passthrough on 2>/dev/null; or true
+        printf "\033Ptmux;\033\033]5337;%s;%s;%s;%s\007\033\\" "$action" "$nb64" "$pb64" "$cb64"
+        printf "\033]5337;%s;%s;%s;%s\007" "$action" "$nb64" "$pb64" "$cb64"
+    else
+        printf "\033]5337;%s;%s;%s;%s\007" "$action" "$nb64" "$pb64" "$cb64"
+    end
+
+    if test "$wait_mode" = true
+        printf "✓ Opened '%s' in mdterm editor\n" "$f"
+        printf "  [Remote edit session] Press Ctrl+S in editor to save, Enter or Ctrl+C to close\n"
+
+        function __mdterm_fish_cleanup --on-signal SIGINT --on-signal SIGTERM
+            stty echo 2>/dev/null; or true
+            printf "\n"
+        end
+
+        stty -echo 2>/dev/null; or true
+
+        while read -l line
+            set line (string replace -r '\r$' '' -- "$line")
+            if string match -q "__MDTERM_SAVE__:*" -- "$line"
+                set -l payload (string replace -r '^__MDTERM_SAVE__:' '' -- "$line")
+                set -l parts (string split -m 1 ":" -- "$payload")
+                set -l save_content "$parts[2]"
+                if test -z "$save_content"
+                    set save_content "$parts[1]"
+                end
+
+                if test -n "$save_content"
+                    printf "%s" "$save_content" | base64 -d > "$f" 2>/dev/null; or printf "%s" "$save_content" | base64 -D > "$f" 2>/dev/null; or true
+                    if set -q TMUX
+                        printf "\033Ptmux;\033\033]5337;saved;%s\007\033\\" "$nb64"
+                        printf "\033]5337;saved;%s\007" "$nb64"
+                    else
+                        printf "\033]5337;saved;%s\007" "$nb64"
+                    end
+                    printf "  ✓ [%s] Saved '%s'\n" (date +%T) "$f"
+                end
+            else if string match -q "__MDTERM_CLOSE__*" -- "$line"
+                printf "  ✓ Closed '%s' in mdterm editor\n" "$f"
+                break
+            else
+                printf "  ✓ Exited mdterm remote session\n"
+                break
+            end
+        end
+
+        stty echo 2>/dev/null; or true
+        functions -e __mdterm_fish_cleanup
+    else
+        set -l display_name "$f"
+        if test -z "$display_name"
+            set display_name "stdin.md"
+        end
+        printf "✓ Opened '%s' in mdterm editor\n" "$display_name"
+    end
+end
+FISH_REMOTE
+}
+
+show_remote_setup() {
+    local target_sh="${1:-}"
+    if [ "$target_sh" = "fish" ]; then
+        show_fish_remote_setup
+    elif [ "$target_sh" = "bash" ] || [ "$target_sh" = "zsh" ]; then
+        show_bash_remote_setup
+    else
+        show_bash_remote_setup
+        echo ""
+        show_fish_remote_setup
+    fi
 }
 
 ACTION="open"
 TARGET=""
+WAIT_MODE="auto"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -75,7 +262,17 @@ while [ $# -gt 0 ]; do
             exit 0
             ;;
         --setup-remote)
-            show_remote_setup
+            TARGET_SH="${2:-}"
+            if [ "$TARGET_SH" = "fish" ] || [ "$TARGET_SH" = "bash" ] || [ "$TARGET_SH" = "zsh" ]; then
+                shift
+            else
+                TARGET_SH=""
+            fi
+            show_remote_setup "$TARGET_SH"
+            exit 0
+            ;;
+        --setup-remote=*)
+            show_remote_setup "${1#*=}"
             exit 0
             ;;
         --left|-l)
@@ -84,6 +281,14 @@ while [ $# -gt 0 ]; do
             ;;
         --right)
             ACTION="open-right"
+            shift
+            ;;
+        --no-wait|-n)
+            WAIT_MODE=false
+            shift
+            ;;
+        --wait|-w)
+            WAIT_MODE=true
             shift
             ;;
         *)
@@ -118,10 +323,12 @@ find_gui_binary() {
 
 # Determine execution environment
 IS_INSIDE_MDTERM=false
+IS_REMOTE=false
 if [ -n "$MDTERM" ] || [ "$TERM_PROGRAM" = "mdterm" ]; then
     IS_INSIDE_MDTERM=true
 elif [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_CLIENT" ] || [ -n "$SSH_TTY" ]; then
     IS_INSIDE_MDTERM=true
+    IS_REMOTE=true
 fi
 
 # Detect actual piped or redirected input (not /dev/null from GUI launcher)
@@ -130,6 +337,19 @@ if [ "$TARGET" = "-" ]; then
     HAS_STDIN_DATA=true
 elif [ -z "$TARGET" ] && [ ! -t 0 ] && [ ! -c /dev/stdin ]; then
     HAS_STDIN_DATA=true
+fi
+
+# Resolve wait mode
+if [ "$WAIT_MODE" = "auto" ]; then
+    if [ "$IS_REMOTE" = true ] && [ "$HAS_STDIN_DATA" = false ]; then
+        WAIT_MODE=true
+    else
+        WAIT_MODE=false
+    fi
+fi
+
+if [ "$WAIT_MODE" = true ]; then
+    ACTION="open-remote${ACTION#open}"
 fi
 
 # If outside mdterm and not piping data, delegate to GUI application if available
@@ -183,4 +403,47 @@ else
     printf "\033]5337;%s;%s;%s;%s\007" "$ACTION" "$NAME_B64" "$PATH_B64" "$CONTENT_B64"
 fi
 
-printf "✓ Opened '%s' in mdterm editor\n" "$FILE_NAME"
+if [ "$WAIT_MODE" = true ]; then
+    printf "✓ Opened '%s' in mdterm editor\n" "$FILE_NAME"
+    printf "  [Remote edit session] Press Ctrl+S in editor to save, Enter or Ctrl+C to close\n"
+
+    trap 'stty echo 2>/dev/null || true; printf "\n"' EXIT INT TERM
+    stty -echo 2>/dev/null || true
+
+    while true; do
+        if ! IFS= read -r line; then
+            break
+        fi
+        line="${line%$'\r'}"
+        case "$line" in
+            __MDTERM_SAVE__:*)
+                payload="${line#__MDTERM_SAVE__:}"
+                save_content_b64="${payload#*:}"
+                if [ -n "$save_content_b64" ]; then
+                    printf "%s" "$save_content_b64" | tr -d '\r\n' | base64 -d > "$FILE_PATH" 2>/dev/null || \
+                    printf "%s" "$save_content_b64" | tr -d '\r\n' | base64 -D > "$FILE_PATH" 2>/dev/null || true
+                    if [ -n "$TMUX" ]; then
+                        printf "\033Ptmux;\033\033]5337;saved;%s\007\033\\" "$NAME_B64"
+                        printf "\033]5337;saved;%s\007" "$NAME_B64"
+                    else
+                        printf "\033]5337;saved;%s\007" "$NAME_B64"
+                    fi
+                    printf "  ✓ [%s] Saved '%s'\n" "$(date +%T)" "$FILE_NAME"
+                fi
+                ;;
+            __MDTERM_CLOSE__*)
+                printf "  ✓ Closed '%s' in mdterm editor\n" "$FILE_NAME"
+                break
+                ;;
+            *)
+                printf "  ✓ Exited mdterm remote session\n"
+                break
+                ;;
+        esac
+    done
+
+    stty echo 2>/dev/null || true
+    trap - EXIT INT TERM
+else
+    printf "✓ Opened '%s' in mdterm editor\n" "$FILE_NAME"
+fi

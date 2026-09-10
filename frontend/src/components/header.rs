@@ -5,6 +5,7 @@ use crate::state::{EditorPosition, Theme};
 pub fn EditorHeader(
     active_filename: Signal<String>,
     is_dirty: Signal<bool>,
+    is_remote: Signal<bool>,
     current_theme: RwSignal<Theme>,
     editor_position: RwSignal<EditorPosition>,
     on_close_editor: Callback<()>,
@@ -19,6 +20,11 @@ pub fn EditorHeader(
                     <polyline points="14 2 14 8 20 8"></polyline>
                 </svg>
                 <span class="tab-filename">{move || active_filename.get()}</span>
+                {move || if is_remote.get() {
+                    view! { <span class="tab-remote-tag" title="Connected to remote SSH session">"SSH"</span> }.into_any()
+                } else {
+                    ().into_any()
+                }}
                 {move || if is_dirty.get() {
                     view! { <span class="tab-dirty" title="Unsaved changes">"•"</span> }.into_any()
                 } else {

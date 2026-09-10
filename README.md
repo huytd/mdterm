@@ -187,9 +187,39 @@ cp -R /Volumes/mdterm*/mdterm.app /Applications/
 # 3. Unmount the DMG:
 hdiutil detach /Volumes/mdterm*
 
-# 4. (Optional) Create a symlink to use `mdterm` from any terminal:
-sudo ln -sf /Applications/mdterm.app/Contents/MacOS/mdterm /usr/local/bin/mdterm
 ```
+
+---
+
+## 🌐 Remote Editing over SSH (Zero Server Binaries)
+
+`mdterm` allows opening and saving Markdown files directly across SSH connections and tmux panes without needing to install any binaries on the remote host.
+
+To set up your remote shell:
+
+```bash
+# Print setup function for all shells:
+mdterm --setup-remote
+
+# Or target a specific shell:
+mdterm --setup-remote bash   # for ~/.bashrc or ~/.zshrc
+mdterm --setup-remote fish   # for ~/.config/fish/functions/mdterm.fish
+```
+
+### Usage over SSH:
+
+```bash
+# Opens file in mdterm on your local machine and enables bidirectional saving:
+mdterm README.md
+
+# Open on left pane:
+mdterm --left README.md
+
+# Pipe content from stdin (read-only):
+curl -s https://example.com/doc.md | mdterm
+```
+
+When editing, `Ctrl + S` in the editor saves directly back to the remote server, and closing the editor tab returns your terminal prompt.
 
 ---
 

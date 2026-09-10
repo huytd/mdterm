@@ -163,6 +163,18 @@ html, body {
   line-height: 1;
 }
 
+.tab-remote-tag {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--primary);
+  color: #ffffff;
+  letter-spacing: 0.5px;
+  line-height: 1.2;
+}
+
 .tab-actions {
   display: flex;
   align-items: center;

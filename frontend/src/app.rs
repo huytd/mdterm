@@ -17,6 +17,7 @@ pub fn App() -> impl IntoView {
     let active_path = RwSignal::new(None::<String>);
     let active_content = RwSignal::new(WELCOME_MD.to_string());
     let is_dirty = RwSignal::new(false);
+    let is_remote_doc = RwSignal::new(false);
     let current_theme = RwSignal::new(Theme::Dark);
 
     // Synchronize terminal theme with application theme
@@ -55,10 +56,15 @@ pub fn App() -> impl IntoView {
                         .ok()
                         .and_then(|v| v.as_string())
                         .unwrap_or_else(|| "right".to_string());
+                    let is_remote = js_sys::Reflect::get(&detail, &"is_remote".into())
+                        .ok()
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
 
                     active_filename.set(name);
                     active_path.set(path.clone());
                     is_dirty.set(false);
+                    is_remote_doc.set(is_remote);
                     editor_position.set(if side == "left" { EditorPosition::Left } else { EditorPosition::Right });
                     is_editor_open.set(true);
                     fit_terminal_session();
@@ -81,6 +87,23 @@ pub fn App() -> impl IntoView {
         }
     });
 
+    // Listen for file save events and close events from remote sessions
+    Effect::new(move |_| {
+        if let Some(win) = web_sys::window() {
+            let cb_saved = wasm_bindgen::closure::Closure::wrap(Box::new(move |_: web_sys::CustomEvent| {
+                is_dirty.set(false);
+            }) as Box<dyn FnMut(web_sys::CustomEvent)>);
+            let _ = win.add_event_listener_with_callback("mdterm-file-saved", cb_saved.as_ref().unchecked_ref());
+            cb_saved.forget();
+
+            let cb_closed = wasm_bindgen::closure::Closure::wrap(Box::new(move |_: web_sys::CustomEvent| {
+                is_remote_doc.set(false);
+            }) as Box<dyn FnMut(web_sys::CustomEvent)>);
+            let _ = win.add_event_listener_with_callback("mdterm-remote-closed", cb_closed.as_ref().unchecked_ref());
+            cb_closed.forget();
+        }
+    });
+
     // Open file passed via command line / file manager association
     Effect::new(move |_| {
         leptos::task::spawn_local(async move {
@@ -94,6 +117,7 @@ pub fn App() -> impl IntoView {
                     active_path.set(Some(file_path));
                     active_content.set(disk_content);
                     is_dirty.set(false);
+                    is_remote_doc.set(false);
                     is_editor_open.set(true);
                     fit_terminal_session();
                 }
@@ -111,18 +135,33 @@ pub fn App() -> impl IntoView {
     let save_active_document = move || {
         let content = active_content.get();
         let target_path = active_path.get().unwrap_or_else(|| active_filename.get());
+        let is_remote = is_remote_doc.get();
 
-        leptos::task::spawn_local(async move {
-            if tauri_bridge::write_file(&target_path, &content).await.is_ok() {
-                is_dirty.set(false);
-                active_path.set(Some(target_path.clone()));
-                let name = std::path::Path::new(&target_path)
-                    .file_name()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or(target_path);
-                active_filename.set(name);
-            }
-        });
+        if is_remote {
+            leptos::task::spawn_local(async move {
+                if let Err(e) = tauri_bridge::send_remote_save(&target_path, &content).await {
+                    tauri_bridge::show_toast(&format!("Remote save error: {}", e));
+                }
+            });
+        } else {
+            leptos::task::spawn_local(async move {
+                match tauri_bridge::write_file(&target_path, &content).await {
+                    Ok(_) => {
+                        is_dirty.set(false);
+                        active_path.set(Some(target_path.clone()));
+                        let name = std::path::Path::new(&target_path)
+                            .file_name()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or(target_path.clone());
+                        active_filename.set(name.clone());
+                        tauri_bridge::show_toast(&format!("Saved '{}'", name));
+                    }
+                    Err(e) => {
+                        tauri_bridge::show_toast(&format!("Save failed: {}", e));
+                    }
+                }
+            });
+        }
     };
 
     // Open existing file
@@ -139,6 +178,7 @@ pub fn App() -> impl IntoView {
                 active_filename.set(name);
                 active_path.set(Some(path_clone));
                 is_dirty.set(false);
+                is_remote_doc.set(false);
                 is_editor_open.set(true);
                 fit_terminal_session();
             }
@@ -151,6 +191,7 @@ pub fn App() -> impl IntoView {
         active_path.set(None);
         active_content.set("# Untitled Document\n\nStart typing here...".to_string());
         is_dirty.set(false);
+        is_remote_doc.set(false);
         editor_position.set(if open_on_left { EditorPosition::Left } else { EditorPosition::Right });
         is_editor_open.set(true);
         fit_terminal_session();
@@ -158,6 +199,12 @@ pub fn App() -> impl IntoView {
 
     // Close Editor (return to full-screen terminal)
     let handle_close_editor = Callback::new(move |_| {
+        if is_remote_doc.get() {
+            leptos::task::spawn_local(async move {
+                tauri_bridge::close_remote_session().await;
+            });
+            is_remote_doc.set(false);
+        }
         is_editor_open.set(false);
         fit_terminal_session();
         focus_terminal_session();
@@ -435,6 +482,7 @@ pub fn App() -> impl IntoView {
                             <EditorHeader
                                 active_filename=active_filename.into()
                                 is_dirty=is_dirty.into()
+                                is_remote=is_remote_doc.into()
                                 current_theme=current_theme
                                 editor_position=editor_position
                                 on_close_editor=handle_close_editor
@@ -503,6 +551,7 @@ pub fn App() -> impl IntoView {
                     active_path.set(Some(name));
                     active_content.set("# New File\n\n".to_string());
                     is_dirty.set(false);
+                    is_remote_doc.set(false);
                     is_editor_open.set(true);
                     fit_terminal_session();
                 })

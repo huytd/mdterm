@@ -44,6 +44,55 @@ export function windowFind(query, caseSensitive, backward) {
     return false;
 }
 
+export function showToast(message) {
+    let toast = document.getElementById('mdterm-toast-container');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'mdterm-toast-container';
+        toast.className = 'toast-container';
+        document.body.appendChild(toast);
+    }
+    toast.innerHTML = '<span class="toast-icon">✓</span> <span class="toast-text">' + message + '</span>';
+    toast.classList.add('toast-show');
+    clearTimeout(window._mdtermToastTimer);
+    window._mdtermToastTimer = setTimeout(() => {
+        toast.classList.remove('toast-show');
+    }, 3500);
+}
+
+export function encodeB64(str) {
+    if (!str) return '';
+    try {
+        const bytes = new TextEncoder().encode(str);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        return btoa(binary);
+    } catch (e) {
+        return btoa(unescape(encodeURIComponent(str)));
+    }
+}
+
+export async function sendRemoteSave(path, content) {
+    if (window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function') {
+        const pathB64 = encodeB64(path);
+        const contentB64 = encodeB64(content);
+        const packet = '__MDTERM_SAVE__:' + pathB64 + ':' + contentB64 + '\n';
+        await window.__TAURI__.core.invoke('pty_write', { data: packet });
+        return true;
+    }
+    return false;
+}
+
+export async function closeRemoteSession() {
+    if (window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function') {
+        await window.__TAURI__.core.invoke('pty_write', { data: '__MDTERM_CLOSE__\n' }).catch(() => {});
+        return true;
+    }
+    return false;
+}
+
 const TERMINAL_THEMES = {
     dark: {
         background: '#0f141c',
@@ -398,10 +447,24 @@ export function initTerminalSession(containerId) {
                 const name = decodeB64(parts[1]) || 'document.md';
                 const path = decodeB64(parts[2]);
                 const content = decodeB64(parts[3]);
+                const isRemote = action.includes('remote') || action.includes('wait');
 
-                showToast("Opened '" + name + "' in editor (" + side + ")");
+                showToast("Opened '" + name + "' in editor (" + (isRemote ? "remote, " : "") + side + ")");
                 window.dispatchEvent(new CustomEvent('mdterm-open-file', {
-                    detail: { name, path, content, side }
+                    detail: { name, path, content, side, is_remote: isRemote }
+                }));
+                return true;
+            } else if (action === 'saved') {
+                const name = decodeB64(parts[1]) || 'document.md';
+                showToast("✓ Saved '" + name + "' on remote server");
+                window.dispatchEvent(new CustomEvent('mdterm-file-saved', {
+                    detail: { name }
+                }));
+                return true;
+            } else if (action === 'closed') {
+                const name = decodeB64(parts[1]) || 'document.md';
+                window.dispatchEvent(new CustomEvent('mdterm-remote-closed', {
+                    detail: { name }
                 }));
                 return true;
             } else if (action.startsWith('open-file')) {
@@ -409,7 +472,7 @@ export function initTerminalSession(containerId) {
                 const name = path.split('/').pop() || path;
                 showToast("Opened '" + name + "' in editor (" + side + ")");
                 window.dispatchEvent(new CustomEvent('mdterm-open-file', {
-                    detail: { name, path, content: '', side }
+                    detail: { name, path, content: '', side, is_remote: false }
                 }));
                 return true;
             }
@@ -708,6 +771,29 @@ extern "C" {
 
     #[wasm_bindgen(js_name = focusTerminalSession)]
     pub fn focus_terminal_session();
+
+    #[wasm_bindgen(js_name = showToast)]
+    pub fn show_toast(message: &str);
+
+    #[wasm_bindgen(js_name = sendRemoteSave, catch)]
+    async fn sendRemoteSave(
+        path: &str,
+        content: &str,
+    ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue>;
+
+    #[wasm_bindgen(js_name = closeRemoteSession, catch)]
+    async fn closeRemoteSession() -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue>;
+}
+
+pub async fn send_remote_save(path: &str, content: &str) -> Result<(), String> {
+    sendRemoteSave(path, content)
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("Remote save error: {:?}", e))
+}
+
+pub async fn close_remote_session() {
+    let _ = closeRemoteSession().await;
 }
 
 pub async fn read_file(path: &str) -> Result<String, String> {
