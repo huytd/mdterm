@@ -11,6 +11,24 @@ use crate::tauri_bridge::{
     window_find,
 };
 
+const THEME_STORAGE_KEY: &str = "mdterm_theme";
+
+fn load_persisted_theme() -> Theme {
+    web_sys::window()
+        .and_then(|window| window.local_storage().ok().flatten())
+        .and_then(|storage| storage.get_item(THEME_STORAGE_KEY).ok().flatten())
+        .and_then(|class_name| Theme::from_class_name(&class_name))
+        .unwrap_or(Theme::Dark)
+}
+
+fn persist_theme(theme: Theme) {
+    if let Some(storage) = web_sys::window()
+        .and_then(|window| window.local_storage().ok().flatten())
+    {
+        let _ = storage.set_item(THEME_STORAGE_KEY, theme.class_name());
+    }
+}
+
 #[component]
 pub fn App() -> impl IntoView {
     // 1. Core State
@@ -21,12 +39,13 @@ pub fn App() -> impl IntoView {
     let active_content = RwSignal::new(WELCOME_MD.to_string());
     let is_dirty = RwSignal::new(false);
     let is_remote_doc = RwSignal::new(false);
-    let current_theme = RwSignal::new(Theme::Dark);
+    let current_theme = RwSignal::new(load_persisted_theme());
 
-    // Synchronize the terminal and native window chrome with the application theme.
+    // Persist and synchronize the terminal and native window chrome with the app theme.
     Effect::new(move |_| {
         let theme = current_theme.get();
         let theme_name = theme.class_name();
+        persist_theme(theme);
         set_terminal_theme(theme_name);
         leptos::task::spawn_local(async move {
             let _ = tauri_bridge::set_window_theme(theme_name).await;

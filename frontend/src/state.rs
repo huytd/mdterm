@@ -26,6 +26,16 @@ pub enum Theme {
 }
 
 impl Theme {
+    pub fn from_class_name(class_name: &str) -> Option<Self> {
+        match class_name {
+            "theme-dark" => Some(Theme::Dark),
+            "theme-light" => Some(Theme::Light),
+            "theme-nord" => Some(Theme::Nord),
+            "theme-monokai" => Some(Theme::Monokai),
+            _ => None,
+        }
+    }
+
     pub fn class_name(&self) -> &'static str {
         match self {
             Theme::Dark => "theme-dark",
@@ -52,6 +62,23 @@ impl Theme {
             Theme::Nord => Theme::Monokai,
             Theme::Monokai => Theme::Dark,
         }
+    }
+}
+
+#[cfg(test)]
+mod theme_tests {
+    use super::Theme;
+
+    #[test]
+    fn theme_class_names_round_trip() {
+        for theme in [Theme::Dark, Theme::Light, Theme::Nord, Theme::Monokai] {
+            assert_eq!(Theme::from_class_name(theme.class_name()), Some(theme));
+        }
+    }
+
+    #[test]
+    fn unknown_theme_class_is_rejected() {
+        assert_eq!(Theme::from_class_name("theme-unknown"), None);
     }
 }
 
