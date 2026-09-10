@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# mdterm CLI: Open Markdown files in mdterm WYSIWYG editor
+# Works locally, over SSH, and inside tmux!
+
+set -e
+
+show_help() {
+    cat << 'HELP'
+mdterm - Open Markdown files in mdterm WYSIWYG editor
+
+USAGE:
+    mdterm <file.md>          Open a file in mdterm editor
+    mdterm -                  Read markdown from stdin and open in editor
+    cat file.md | mdterm      Pipe markdown into mdterm editor
+    mdterm --setup-remote     Print shell script/function to use on remote SSH servers
+    mdterm --help             Show this help message
+
+COMPATIBILITY:
+    • Local: Works directly in the mdterm terminal pane
+    • SSH: Transmits file content over terminal stream via OSC escape sequences
+    • Tmux: Uses tmux DCS passthrough (auto-enables allow-passthrough)
+HELP
+}
+
+show_remote_setup() {
+    cat << 'REMOTE'
+# Add this function to your remote machine's ~/.bashrc or ~/.zshrc:
+mdterm() {
+  local f="$1"
+  if [ -z "$f" ] || [ "$f" = "-" ]; then
+    local content
+    content=$(cat)
+    local nb64 pb64 cb64
+    nb64=$(printf "%s" "stdin.md" | base64 | tr -d '\r\n')
+    pb64=$(printf "%s" "stdin.md" | base64 | tr -d '\r\n')
+    cb64=$(printf "%s" "$content" | base64 | tr -d '\r\n')
+  else
+    if [ ! -f "$f" ]; then touch "$f" 2>/dev/null || true; fi
+    local nb64 pb64 cb64
+    nb64=$(basename "$f" | base64 | tr -d '\r\n')
+    pb64=$(realpath "$f" 2>/dev/null || printf "%s" "$f")
+    pb64=$(printf "%s" "$pb64" | base64 | tr -d '\r\n')
+    cb64=$(base64 "$f" 2>/dev/null | tr -d '\r\n' || true)
+  fi
+
+  if [ -n "$TMUX" ]; then
+    tmux set -p allow-passthrough on 2>/dev/null || true
+    printf "\033Ptmux;\033\033]5337;open;%s;%s;%s\007\033\\" "$nb64" "$pb64" "$cb64"
+    printf "\033]5337;open;%s;%s;%s\007" "$nb64" "$pb64" "$cb64"
+  else
+    printf "\033]5337;open;%s;%s;%s\007" "$nb64" "$pb64" "$cb64"
+  fi
+  printf "✓ Opened '%s' in mdterm editor\n" "${1:-stdin.md}"
+}
+REMOTE
+}
+
+if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+    show_help
+    exit 0
+fi
+
+if [ "$1" = "--setup-remote" ] || [ "$1" = "-r" ]; then
+    show_remote_setup
+    exit 0
+fi
+
+# Check if input is from pipe or stdin argument
+if [ "$1" = "-" ] || [ -z "$1" -a ! -t 0 ]; then
+    FILE_NAME="stdin.md"
+    FILE_PATH="stdin.md"
+    CONTENT=$(cat)
+    NAME_B64=$(printf "%s" "$FILE_NAME" | base64 | tr -d '\r\n')
+    PATH_B64=$(printf "%s" "$FILE_PATH" | base64 | tr -d '\r\n')
+    CONTENT_B64=$(printf "%s" "$CONTENT" | base64 | tr -d '\r\n')
+elif [ -n "$1" ]; then
+    FILE="$1"
+    if [ ! -f "$FILE" ]; then
+        touch "$FILE" 2>/dev/null || true
+    fi
+    FILE_NAME=$(basename "$FILE")
+    FILE_PATH=$(realpath "$FILE" 2>/dev/null || printf "%s" "$FILE")
+    NAME_B64=$(printf "%s" "$FILE_NAME" | base64 | tr -d '\r\n')
+    PATH_B64=$(printf "%s" "$FILE_PATH" | base64 | tr -d '\r\n')
+    if [ -f "$FILE" ]; then
+        CONTENT_B64=$(base64 "$FILE" 2>/dev/null | tr -d '\r\n' || true)
+    else
+        CONTENT_B64=""
+    fi
+else
+    show_help
+    exit 1
+fi
+
+# Transmit escape sequence to terminal
+if [ -n "$TMUX" ]; then
+    tmux set -p allow-passthrough on 2>/dev/null || true
+    tmux set -g allow-passthrough on 2>/dev/null || true
+    # Emit DCS passthrough for tmux
+    printf "\033Ptmux;\033\033]5337;open;%s;%s;%s\007\033\\" "$NAME_B64" "$PATH_B64" "$CONTENT_B64"
+    # Also emit direct OSC
+    printf "\033]5337;open;%s;%s;%s\007" "$NAME_B64" "$PATH_B64" "$CONTENT_B64"
+else
+    printf "\033]5337;open;%s;%s;%s\007" "$NAME_B64" "$PATH_B64" "$CONTENT_B64"
+fi
+
+printf "✓ Opened '%s' in mdterm editor\n" "$FILE_NAME"

@@ -1,4 +1,5 @@
 use leptos::prelude::*;
+use wasm_bindgen::JsCast;
 use web_sys::{KeyboardEvent, MouseEvent};
 
 use crate::components::samples::WELCOME_MD;
@@ -24,6 +25,46 @@ pub fn App() -> impl IntoView {
     let active_modal = RwSignal::new(ActiveModal::None);
     let find_replace = RwSignal::new(FindReplaceState::default());
     let slash_menu = RwSignal::new(SlashMenuState::default());
+
+    // Listen for file open requests triggered from terminal (OSC 5337 / mdterm CLI)
+    Effect::new(move |_| {
+        if let Some(win) = web_sys::window() {
+            let cb = wasm_bindgen::closure::Closure::wrap(Box::new(move |ev: web_sys::CustomEvent| {
+                if let Ok(detail) = js_sys::Reflect::get(&ev, &"detail".into()) {
+                    let name = js_sys::Reflect::get(&detail, &"name".into())
+                        .ok()
+                        .and_then(|v| v.as_string())
+                        .unwrap_or_else(|| "document.md".to_string());
+                    let path = js_sys::Reflect::get(&detail, &"path".into())
+                        .ok()
+                        .and_then(|v| v.as_string())
+                        .filter(|s| !s.is_empty());
+                    let content = js_sys::Reflect::get(&detail, &"content".into())
+                        .ok()
+                        .and_then(|v| v.as_string())
+                        .unwrap_or_default();
+
+                    active_filename.set(name);
+                    active_path.set(path.clone());
+                    is_dirty.set(false);
+
+                    if !content.is_empty() {
+                        active_content.set(content);
+                    } else if let Some(p) = path {
+                        let p_clone = p.clone();
+                        leptos::task::spawn_local(async move {
+                            if let Ok(disk_content) = tauri_bridge::read_file(&p_clone).await {
+                                active_content.set(disk_content);
+                            }
+                        });
+                    }
+                }
+            }) as Box<dyn FnMut(web_sys::CustomEvent)>);
+
+            let _ = win.add_event_listener_with_callback("mdterm-open-file", cb.as_ref().unchecked_ref());
+            cb.forget();
+        }
+    });
 
     // Handle content updates from editor
     let handle_content_change = Callback::new(move |new_text: String| {

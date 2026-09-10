@@ -821,3 +821,35 @@ kbd, code {
   font-size: 11px;
   color: var(--text-main);
 }
+
+/* Toast Notification */
+.toast-container {
+  position: fixed;
+  bottom: 24px;
+  left: 24px;
+  background-color: var(--bg-surface);
+  color: var(--text-main);
+  border: 1px solid var(--primary);
+  box-shadow: var(--shadow-lg);
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0;
+  transform: translateY(12px);
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  z-index: 999;
+}
+
+.toast-container.toast-show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast-icon {
+  color: var(--success);
+  font-weight: bold;
+}

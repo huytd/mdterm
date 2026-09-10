@@ -111,6 +111,74 @@ export function initTerminalSession(containerId) {
         }
     }, 60);
 
+    // Decode UTF-8 string from Base64
+    const decodeB64 = (str) => {
+        if (!str) return '';
+        try {
+            const binary = atob(str.trim());
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            return new TextDecoder().decode(bytes);
+        } catch (e) {
+            return atob(str.trim());
+        }
+    };
+
+    // Show animated toast notification
+    const showToast = (message) => {
+        let toast = document.getElementById('mdterm-toast-container');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'mdterm-toast-container';
+            toast.className = 'toast-container';
+            document.body.appendChild(toast);
+        }
+        toast.innerHTML = '<span class="toast-icon">✓</span> <span class="toast-text">' + message + '</span>';
+        toast.classList.add('toast-show');
+        clearTimeout(window._mdtermToastTimer);
+        window._mdtermToastTimer = setTimeout(() => {
+            toast.classList.remove('toast-show');
+        }, 3500);
+    };
+
+    // Handler for OSC escape sequences: \x1b]5337;open;NAME_B64;PATH_B64;CONTENT_B64\x07
+    const handleOpenOsc = (data) => {
+        try {
+            const parts = data.split(';');
+            const action = parts[0];
+            if (action === 'open' || action === 'open-content') {
+                const name = decodeB64(parts[1]) || 'document.md';
+                const path = decodeB64(parts[2]);
+                const content = decodeB64(parts[3]);
+
+                showToast("Opened '" + name + "' from terminal");
+                window.dispatchEvent(new CustomEvent('mdterm-open-file', {
+                    detail: { name, path, content }
+                }));
+                return true;
+            } else if (action === 'open-file') {
+                const path = parts.slice(1).join(';');
+                const name = path.split('/').pop() || path;
+                showToast("Opened '" + name + "' from terminal");
+                window.dispatchEvent(new CustomEvent('mdterm-open-file', {
+                    detail: { name, path, content: '' }
+                }));
+                return true;
+            }
+        } catch (e) {
+            console.error('Error handling terminal OSC sequence:', e);
+        }
+        return false;
+    };
+
+    if (term.parser && typeof term.parser.registerOscHandler === 'function') {
+        term.parser.registerOscHandler(5337, handleOpenOsc);
+        term.parser.registerOscHandler(7777, handleOpenOsc);
+        term.parser.registerOscHandler(1337, handleOpenOsc);
+    }
+
     const hasTauri = !!(window.__TAURI__ && window.__TAURI__.core);
 
     if (hasTauri) {
@@ -156,6 +224,12 @@ export function initTerminalSession(containerId) {
                 term.write('\r\n');
                 if (buf.trim() === 'clear') {
                     term.clear();
+                } else if (buf.trim().startsWith('mdterm ')) {
+                    const fname = buf.trim().slice(7).trim();
+                    window.dispatchEvent(new CustomEvent('mdterm-open-file', {
+                        detail: { name: fname, path: fname, content: '# ' + fname + '\n\nOpened via terminal in mdterm editor.' }
+                    }));
+                    term.write('\x1b[32m✓ Opened \'' + fname + '\' in mdterm editor\x1b[0m\r\n');
                 } else if (buf.trim().length > 0) {
                     term.write('Command in demo mode: ' + buf + '\r\n');
                 }

@@ -150,6 +150,16 @@ fn pty_spawn(app: AppHandle, state: State<PtyState>, cols: u16, rows: u16) -> Re
     let mut cmd = CommandBuilder::new(&shell);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
+
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    let home_bin = dirs::home_dir()
+        .map(|h| h.join(".local/bin").to_string_lossy().to_string())
+        .unwrap_or_default();
+    let repo_bin = std::env::current_dir()
+        .map(|d| d.join("bin").to_string_lossy().to_string())
+        .unwrap_or_default();
+    cmd.env("PATH", format!("{}:{}:{}", repo_bin, home_bin, existing_path));
+
     if let Ok(current_dir) = std::env::current_dir() {
         cmd.cwd(current_dir);
     }
