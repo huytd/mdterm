@@ -44,6 +44,120 @@ export function windowFind(query, caseSensitive, backward) {
     return false;
 }
 
+const TERMINAL_THEMES = {
+    dark: {
+        background: '#0f141c',
+        foreground: '#e2e8f0',
+        cursor: '#38bdf8',
+        cursorAccent: '#0f141c',
+        selectionBackground: 'rgba(56, 189, 248, 0.35)',
+        black: '#1e293b',
+        red: '#f87171',
+        green: '#4ade80',
+        yellow: '#fbbf24',
+        blue: '#60a5fa',
+        magenta: '#c084fc',
+        cyan: '#38bdf8',
+        white: '#f1f5f9',
+        brightBlack: '#64748b',
+        brightRed: '#ef4444',
+        brightGreen: '#22c55e',
+        brightYellow: '#eab308',
+        brightBlue: '#3b82f6',
+        brightMagenta: '#a855f7',
+        brightCyan: '#06b6d4',
+        brightWhite: '#ffffff'
+    },
+    light: {
+        background: '#f8fafc',
+        foreground: '#0f172a',
+        cursor: '#0284c7',
+        cursorAccent: '#f8fafc',
+        selectionBackground: 'rgba(2, 132, 199, 0.25)',
+        black: '#334155',
+        red: '#dc2626',
+        green: '#16a34a',
+        yellow: '#ca8a04',
+        blue: '#2563eb',
+        magenta: '#9333ea',
+        cyan: '#0891b2',
+        white: '#cbd5e1',
+        brightBlack: '#475569',
+        brightRed: '#b91c1c',
+        brightGreen: '#15803d',
+        brightYellow: '#a16207',
+        brightBlue: '#1d4ed8',
+        brightMagenta: '#7e22ce',
+        brightCyan: '#0e7490',
+        brightWhite: '#020617'
+    },
+    nord: {
+        background: '#242933',
+        foreground: '#eceff4',
+        cursor: '#88c0d0',
+        cursorAccent: '#242933',
+        selectionBackground: 'rgba(136, 192, 208, 0.3)',
+        black: '#2e3440',
+        red: '#bf616a',
+        green: '#a3be8c',
+        yellow: '#ebcb8b',
+        blue: '#81a1c1',
+        magenta: '#b48ead',
+        cyan: '#88c0d0',
+        white: '#e5e9f0',
+        brightBlack: '#4c566a',
+        brightRed: '#bf616a',
+        brightGreen: '#a3be8c',
+        brightYellow: '#ebcb8b',
+        brightBlue: '#81a1c1',
+        brightMagenta: '#b48ead',
+        brightCyan: '#8fbcbb',
+        brightWhite: '#eceff4'
+    },
+    monokai: {
+        background: '#1e1f1c',
+        foreground: '#f8f8f2',
+        cursor: '#f8f8f0',
+        cursorAccent: '#1e1f1c',
+        selectionBackground: 'rgba(73, 72, 62, 0.7)',
+        black: '#272822',
+        red: '#f92672',
+        green: '#a6e22e',
+        yellow: '#e6db74',
+        blue: '#66d9ef',
+        magenta: '#ae81ff',
+        cyan: '#a1efe4',
+        white: '#f8f8f2',
+        brightBlack: '#75715e',
+        brightRed: '#f92672',
+        brightGreen: '#a6e22e',
+        brightYellow: '#e6db74',
+        brightBlue: '#66d9ef',
+        brightMagenta: '#ae81ff',
+        brightCyan: '#a1efe4',
+        brightWhite: '#f9f8f5'
+    }
+};
+
+function getTerminalTheme(name) {
+    if (!name) return TERMINAL_THEMES.dark;
+    const clean = name.toLowerCase().replace(/^theme-/, '');
+    return TERMINAL_THEMES[clean] || TERMINAL_THEMES.dark;
+}
+
+export function setTerminalTheme(themeName) {
+    window._mdtermCurrentTheme = themeName;
+    if (window._mdtermTerminal) {
+        const theme = getTerminalTheme(themeName);
+        window._mdtermTerminal.options.theme = theme;
+        try {
+            if (typeof window._mdtermTerminal.refresh === 'function') {
+                window._mdtermTerminal.refresh(0, (window._mdtermTerminal.rows || 24) - 1);
+            }
+        } catch (e) {}
+    }
+}
+
 export function initTerminalSession(containerId) {
     const container = document.getElementById(containerId);
     if (!container) return;
@@ -65,35 +179,14 @@ export function initTerminalSession(containerId) {
         return;
     }
 
+    const initialTheme = getTerminalTheme(window._mdtermCurrentTheme || 'dark');
     const term = new Terminal({
         cursorBlink: true,
         cursorStyle: 'bar',
         fontSize: 13,
         lineHeight: 1.25,
         fontFamily: 'JetBrains Mono, Menlo, Monaco, Consolas, "Courier New", monospace',
-        theme: {
-            background: '#0f141c',
-            foreground: '#e2e8f0',
-            cursor: '#38bdf8',
-            cursorAccent: '#0f141c',
-            selectionBackground: 'rgba(56, 189, 248, 0.35)',
-            black: '#1e293b',
-            red: '#f87171',
-            green: '#4ade80',
-            yellow: '#fbbf24',
-            blue: '#60a5fa',
-            magenta: '#c084fc',
-            cyan: '#38bdf8',
-            white: '#f1f5f9',
-            brightBlack: '#64748b',
-            brightRed: '#ef4444',
-            brightGreen: '#22c55e',
-            brightYellow: '#eab308',
-            brightBlue: '#3b82f6',
-            brightMagenta: '#a855f7',
-            brightCyan: '#06b6d4',
-            brightWhite: '#ffffff'
-        },
+        theme: initialTheme,
         convertEol: true,
         allowTransparency: false
     });
@@ -389,6 +482,9 @@ export function initTerminalSession(containerId) {
 
     window._mdtermTerminal = term;
     window._mdtermFitAddon = fitAddon;
+    if (window._mdtermCurrentTheme) {
+        setTerminalTheme(window._mdtermCurrentTheme);
+    }
 }
 
 export function clearTerminalSession() {
@@ -438,6 +534,9 @@ extern "C" {
 
     #[wasm_bindgen(js_name = initTerminalSession)]
     pub fn init_terminal_session(container_id: &str);
+
+    #[wasm_bindgen(js_name = setTerminalTheme)]
+    pub fn set_terminal_theme(theme_name: &str);
 
     #[wasm_bindgen(js_name = clearTerminalSession)]
     pub fn clear_terminal_session();

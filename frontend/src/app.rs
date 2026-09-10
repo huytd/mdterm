@@ -6,7 +6,7 @@ use crate::components::samples::WELCOME_MD;
 use crate::components::{EditorHeader, FloatingControls, Modals, TerminalPane, WysiwygEditor};
 use crate::markdown::markdown_to_html;
 use crate::state::{ActiveModal, EditorPosition, FindReplaceState, SlashMenuState, Theme};
-use crate::tauri_bridge::{self, exec_editor_cmd, fit_terminal_session, window_find};
+use crate::tauri_bridge::{self, exec_editor_cmd, fit_terminal_session, set_terminal_theme, window_find};
 
 #[component]
 pub fn App() -> impl IntoView {
@@ -18,6 +18,12 @@ pub fn App() -> impl IntoView {
     let active_content = RwSignal::new(WELCOME_MD.to_string());
     let is_dirty = RwSignal::new(false);
     let current_theme = RwSignal::new(Theme::Dark);
+
+    // Synchronize terminal theme with application theme
+    Effect::new(move |_| {
+        let theme = current_theme.get();
+        set_terminal_theme(theme.class_name());
+    });
 
     // Split ratio: width percentage of the editor pane (20% - 80%, default 50%)
     let split_ratio = RwSignal::new(50.0f64);
