@@ -41,9 +41,6 @@
       "deb": {
         "desktopTemplate": "desktop-template.desktop"
       }
-    },
-    "android": {
-      "debugApplicationIdSuffix": ".debug"
     }
   }
 }
