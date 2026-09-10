@@ -1,0 +1,79 @@
+name: Build & Bundle
+
+on:
+  push:
+    branches: [ master, main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+jobs:
+  build-ubuntu:
+    name: Build Linux (Ubuntu)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Setup Rust stable & wasm target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install Trunk & Tauri CLI
+        run: |
+          cargo install trunk
+          cargo install tauri-cli --version "^2.0.0"
+
+      - name: Build Linux binary and .deb bundle
+        run: cargo tauri build --bundles deb
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mdterm-linux-ubuntu
+          path: |
+            target/release/mdterm
+            target/release/bundle/deb/*.deb
+
+  build-macos:
+    name: Build macOS (Universal)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust stable & macOS targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown, aarch64-apple-darwin, x86_64-apple-darwin
+
+      - name: Install Trunk & Tauri CLI
+        run: |
+          cargo install trunk
+          cargo install tauri-cli --version "^2.0.0"
+
+      - name: Build Universal macOS DMG and .app bundle
+        run: cargo tauri build --target universal-apple-darwin
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mdterm-macos-universal
+          path: |
+            target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            target/universal-apple-darwin/release/bundle/macos/*.app
