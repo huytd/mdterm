@@ -14,7 +14,7 @@ pub mod toolbar;
 pub mod wysiwyg_editor;
 pub mod terminal;
 
-pub use header::Header;
+pub use header::{EditorHeader, FloatingControls};
 pub use modals::Modals;
 pub use terminal::TerminalPane;
 pub use wysiwyg_editor::WysiwygEditor;

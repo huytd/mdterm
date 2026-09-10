@@ -44,6 +44,15 @@ impl Theme {
             Theme::Monokai => "Monokai",
         }
     }
+
+    pub fn next(&self) -> Theme {
+        match self {
+            Theme::Dark => Theme::Light,
+            Theme::Light => Theme::Nord,
+            Theme::Nord => Theme::Monokai,
+            Theme::Monokai => Theme::Dark,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

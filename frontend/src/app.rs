@@ -3,7 +3,7 @@ use wasm_bindgen::JsCast;
 use web_sys::{KeyboardEvent, MouseEvent};
 
 use crate::components::samples::WELCOME_MD;
-use crate::components::{Header, Modals, TerminalPane, WysiwygEditor};
+use crate::components::{EditorHeader, FloatingControls, Modals, TerminalPane, WysiwygEditor};
 use crate::markdown::markdown_to_html;
 use crate::state::{ActiveModal, FindReplaceState, SlashMenuState, Theme};
 use crate::tauri_bridge::{self, exec_editor_cmd, fit_terminal_session, window_find};
@@ -129,28 +129,7 @@ pub fn App() -> impl IntoView {
         fit_terminal_session();
     });
 
-    // Toolbar / Shortcut formatting commands
-    let handle_format = Callback::new(move |cmd: &'static str| {
-        match cmd {
-            "tasklist" => {
-                exec_editor_cmd(
-                    "insertHTML",
-                    Some("<ul class=\"task-list\"><li class=\"task-list-item\"><input type=\"checkbox\" class=\"md-task-checkbox\" /> Task</li></ul>"),
-                );
-            }
-            "code" => {
-                exec_editor_cmd("insertHTML", Some("<code>code</code>"));
-            }
-            _ => {
-                exec_editor_cmd(cmd, None);
-            }
-        }
-    });
 
-    let handle_format_block = Callback::new(move |block: &'static str| {
-        let tag = format!("<{}>", block);
-        exec_editor_cmd("formatBlock", Some(&tag));
-    });
 
     let handle_insert_table_confirm = Callback::new(move |(rows, cols): (usize, usize)| {
         let mut table_html = String::from("<table class=\"md-table\"><thead><tr>");
@@ -323,6 +302,10 @@ pub fn App() -> impl IntoView {
                         handle_close_editor.run(());
                     }
                 }
+                "t" => {
+                    ev.prevent_default();
+                    current_theme.update(|t| *t = t.next());
+                }
                 _ => {}
             }
         }
@@ -357,20 +340,6 @@ pub fn App() -> impl IntoView {
             on:keydown=on_window_keydown
             tabindex="0"
         >
-            <Header
-                active_filename=active_filename.into()
-                is_dirty=is_dirty.into()
-                current_theme=current_theme
-                is_editor_open=is_editor_open.into()
-                on_close_editor=handle_close_editor
-                on_new_file=handle_new_file
-                on_open_file=Callback::new(move |_| active_modal.set(ActiveModal::OpenFile))
-                on_save_file=Callback::new(move |_| save_active_document())
-                on_export=Callback::new(move |_| active_modal.set(ActiveModal::Export))
-                on_format=handle_format
-                on_format_block=handle_format_block
-            />
-
             <div class="app-workspace">
                 {move || if is_editor_open.get() {
                     view! {
@@ -378,6 +347,15 @@ pub fn App() -> impl IntoView {
                             class="workspace-pane editor-pane"
                             style=move || format!("width: {}%;", split_ratio.get())
                         >
+                            <EditorHeader
+                                active_filename=active_filename.into()
+                                is_dirty=is_dirty.into()
+                                current_theme=current_theme
+                                on_close_editor=handle_close_editor
+                                on_save_file=Callback::new(move |_| save_active_document())
+                                on_export=Callback::new(move |_| active_modal.set(ActiveModal::Export))
+                            />
+
                             <WysiwygEditor
                                 content=active_content
                                 on_change=handle_content_change
@@ -398,7 +376,13 @@ pub fn App() -> impl IntoView {
                         </div>
                     }.into_any()
                 } else {
-                    ().into_any()
+                    view! {
+                        <FloatingControls
+                            current_theme=current_theme
+                            on_new_file=handle_new_file
+                            on_open_file=Callback::new(move |_| active_modal.set(ActiveModal::OpenFile))
+                        />
+                    }.into_any()
                 }}
 
                 <div
