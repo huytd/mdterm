@@ -12,10 +12,12 @@ pub mod status_bar;
 #[allow(dead_code)]
 pub mod toolbar;
 pub mod wysiwyg_editor;
+pub mod preview;
 pub mod terminal;
 
 pub use header::{EditorHeader, FloatingControls};
 pub use modals::Modals;
+pub use preview::DocumentPreview;
 pub use source_editor::SourceEditor;
 pub use split_editor::SplitEditor;
 pub use terminal::TerminalPane;

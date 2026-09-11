@@ -12,7 +12,7 @@ A native, high-performance **Markdown WYSIWYG Editor** desktop application built
   * **Format Badge**: Editor header automatically detects and indicates document type (`HTML` vs `MD`).
 * **True WYSIWYG Visual Editing**: Write, format, and interact with your documents visually in real-time. Headings, bold, italic, code, quotes, tables, and task lists render inline.
 * **Triple Editing Modes**:
-  * **Visual (WYSIWYG) Mode**: Rich visual document editing surface with instant document synchronization.
+  * **Visual / Preview Mode**: Rich visual WYSIWYG editing surface for Markdown; clean rendered document preview for HTML documents.
   * **Split Mode**: Synchronized side-by-side view (raw source on left, live rendered preview on right for both Markdown and HTML).
   * **Source Mode**: Focused raw source text editor with line numbers gutter, syntax formatting, and hotkeys.
   * **Quick Mode Cycling**: Use `Ctrl + M` or the header mode switch buttons to effortlessly toggle between Visual, Split, and Source views.
@@ -62,6 +62,7 @@ mdterm/
 │           ├── header.rs       # Top window bar, tabs, mode switchers, theme dropdown
 │           ├── toolbar.rs      # Formatting actions (headings, lists, tables, links, images)
 │           ├── wysiwyg_editor.rs # ContentEditable WYSIWYG engine with markdown triggers
+│           ├── preview.rs        # Rendered document preview surface for HTML & Markdown
 │           ├── source_editor.rs  # Line-numbered raw Markdown editor
 │           ├── split_editor.rs   # Side-by-side synchronized view
 │           ├── sidebar.rs      # Files tree, Document Outline TOC, Statistics

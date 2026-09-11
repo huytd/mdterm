@@ -45,19 +45,19 @@ pub fn EditorHeader(
                 <button
                     type="button"
                     class=move || if active_mode.get() == EditorMode::Wysiwyg { "mode-btn active" } else { "mode-btn" }
-                    title="Visual WYSIWYG Mode"
+                    title=move || if is_html_sig.get() { "HTML Preview Mode (Alt+1)" } else { "Visual WYSIWYG Mode (Alt+1)" }
                     on:click=move |_| active_mode.set(EditorMode::Wysiwyg)
                 >
                     <svg class="mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
                         <circle cx="12" cy="12" r="3"></circle>
                     </svg>
-                    <span>"Visual"</span>
+                    <span>{move || if is_html_sig.get() { "Preview" } else { "Visual" }}</span>
                 </button>
                 <button
                     type="button"
                     class=move || if active_mode.get() == EditorMode::Split { "mode-btn active" } else { "mode-btn" }
-                    title="Split Source & Preview Mode"
+                    title="Split Source & Preview Mode (Alt+2)"
                     on:click=move |_| active_mode.set(EditorMode::Split)
                 >
                     <svg class="mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -69,7 +69,7 @@ pub fn EditorHeader(
                 <button
                     type="button"
                     class=move || if active_mode.get() == EditorMode::Source { "mode-btn active" } else { "mode-btn" }
-                    title="Raw Source Code Mode"
+                    title="Raw Source Code Mode (Alt+3)"
                     on:click=move |_| active_mode.set(EditorMode::Source)
                 >
                     <svg class="mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

@@ -450,12 +450,23 @@
   padding: 28px 36px;
 }
 
+.preview-container {
+  flex: 1;
+  height: 100%;
+  overflow-y: auto;
+  padding: 36px 24px;
+  display: flex;
+  justify-content: center;
+  background-color: var(--bg-editor);
+}
+
 .preview-surface {
   width: 100%;
-  max-width: 800px;
+  max-width: 860px;
   margin: 0 auto;
   font-family: var(--font-sans);
   font-size: 15.5px;
   line-height: 1.75;
   color: var(--text-main);
+  word-wrap: break-word;
 }

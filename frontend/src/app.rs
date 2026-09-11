@@ -4,7 +4,8 @@ use web_sys::{KeyboardEvent, MouseEvent};
 
 use crate::components::samples::WELCOME_MD;
 use crate::components::{
-    EditorHeader, FloatingControls, Modals, SourceEditor, SplitEditor, TerminalPane, WysiwygEditor,
+    DocumentPreview, EditorHeader, FloatingControls, Modals, SourceEditor, SplitEditor,
+    TerminalPane, WysiwygEditor,
 };
 use crate::html::{self, HtmlEnvelope};
 use crate::markdown::{html_to_markdown, markdown_to_html};
@@ -483,7 +484,26 @@ pub fn App() -> impl IntoView {
     // Global keyboard shortcut listener
     let on_window_keydown = move |ev: KeyboardEvent| {
         let is_ctrl = ev.ctrl_key() || ev.meta_key();
+        let is_alt = ev.alt_key();
         let key = ev.key().to_lowercase();
+
+        if is_alt {
+            match key.as_str() {
+                "1" => {
+                    ev.prevent_default();
+                    active_mode.set(EditorMode::Wysiwyg);
+                }
+                "2" => {
+                    ev.prevent_default();
+                    active_mode.set(EditorMode::Split);
+                }
+                "3" => {
+                    ev.prevent_default();
+                    active_mode.set(EditorMode::Source);
+                }
+                _ => {}
+            }
+        }
 
         if is_ctrl {
             match key.as_str() {
@@ -591,14 +611,26 @@ pub fn App() -> impl IntoView {
                             />
 
                             {move || match active_mode.get() {
-                                EditorMode::Wysiwyg => view! {
-                                    <WysiwygEditor
-                                        content=active_content
-                                        is_html=is_html_doc.into()
-                                        on_change=handle_content_change
-                                        slash_menu=slash_menu
-                                    />
-                                }.into_any(),
+                                EditorMode::Wysiwyg => {
+                                    if is_html_doc.get() {
+                                        view! {
+                                            <DocumentPreview
+                                                content=active_content.into()
+                                                is_html=is_html_doc.into()
+                                                on_change=handle_content_change
+                                            />
+                                        }.into_any()
+                                    } else {
+                                        view! {
+                                            <WysiwygEditor
+                                                content=active_content
+                                                is_html=is_html_doc.into()
+                                                on_change=handle_content_change
+                                                slash_menu=slash_menu
+                                            />
+                                        }.into_any()
+                                    }
+                                },
                                 EditorMode::Split => view! {
                                     <SplitEditor
                                         content=active_content
