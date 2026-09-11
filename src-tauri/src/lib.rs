@@ -262,6 +262,9 @@ fn pty_spawn(app: AppHandle, state: State<PtyState>, cols: u16, rows: u16) -> Re
     cmd.env("COLORTERM", "truecolor");
     cmd.env("MDTERM", "1");
     cmd.env("TERM_PROGRAM", "mdterm");
+    if std::env::var("LANG").is_err() {
+        cmd.env("LANG", "en_US.UTF-8");
+    }
 
     let existing_path = std::env::var("PATH").unwrap_or_default();
     let home_bin = dirs::home_dir()

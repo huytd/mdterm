@@ -405,7 +405,9 @@ export function applyTerminalConfig(cfg) {
                 window._mdtermTerminal.options.lineHeight = Math.max(1.0, ch);
             }
         }
-        if (window._mdtermFitAddon) {
+        if (typeof window._mdtermSyncResize === 'function') {
+            window._mdtermSyncResize();
+        } else if (window._mdtermFitAddon) {
             try {
                 window._mdtermFitAddon.fit();
                 if (window.__TAURI__) {
@@ -446,11 +448,11 @@ export function initTerminalSession(containerId) {
         const parsed = Number(cfg.font_size || cfg.fontSize);
         if (!isNaN(parsed) && parsed > 0) fontSize = parsed;
     }
-    let fontFamily = 'JetBrains Mono, Menlo, Monaco, Consolas, "Courier New", monospace';
+    let fontFamily = '"Iosevka Term", "JetBrains Mono", "Fira Code", "Cascadia Code", "DejaVu Sans Mono", "Liberation Mono", Menlo, Monaco, Consolas, "Courier New", monospace';
     if (cfg.font_family || cfg.fontFamily) {
         fontFamily = cfg.font_family || cfg.fontFamily;
     }
-    let lineHeight = 1.25;
+    let lineHeight = 1.0;
     const rawHeight = cfg.character_height || cfg.characterHeight || cfg.line_height || cfg.lineHeight;
     if (rawHeight !== undefined && rawHeight !== null) {
         let ch = Number(rawHeight);
@@ -480,9 +482,23 @@ export function initTerminalSession(containerId) {
         lineHeight: lineHeight,
         fontFamily: fontFamily,
         theme: initialTheme,
-        convertEol: true,
+        convertEol: false,
+        customGlyphs: true,
         allowTransparency: false
     });
+
+    // Load Unicode 11 addon for accurate glyph widths (nerd fonts, tmux status, emoji)
+    if (typeof Unicode11Addon !== 'undefined' && Unicode11Addon.Unicode11Addon) {
+        try {
+            const unicode11Addon = new Unicode11Addon.Unicode11Addon();
+            term.loadAddon(unicode11Addon);
+            if (term.unicode) {
+                term.unicode.activeVersion = '11';
+            }
+        } catch (e) {
+            console.warn('Failed to load Unicode11Addon:', e);
+        }
+    }
 
     let fitAddon = null;
     if (typeof FitAddon !== 'undefined' && FitAddon.FitAddon) {
@@ -491,6 +507,21 @@ export function initTerminalSession(containerId) {
     }
 
     term.open(container);
+
+    // Load CanvasAddon for hardware-accelerated, seamless box drawing character rendering
+    if (typeof CanvasAddon !== 'undefined' && CanvasAddon.CanvasAddon) {
+        try {
+            const canvasAddon = new CanvasAddon.CanvasAddon();
+            term.loadAddon(canvasAddon);
+            window._mdtermCanvasAddon = canvasAddon;
+        } catch (e) {
+            console.warn('CanvasAddon failed to load, falling back to DOM renderer:', e);
+        }
+    }
+
+    if (fitAddon) {
+        try { fitAddon.fit(); } catch (e) {}
+    }
 
     const tauriInvoke = window.__TAURI__ && window.__TAURI__.core
         ? window.__TAURI__.core.invoke
@@ -575,20 +606,34 @@ export function initTerminalSession(containerId) {
         } catch (e) {}
     };
 
-    // Immediate & staggered focus to ensure terminal is active upon app start
+    // Immediate & staggered focus and resize sync to ensure terminal layout is accurate upon app start
     focusTerm();
     if (typeof requestAnimationFrame === 'function') {
-        requestAnimationFrame(focusTerm);
+        requestAnimationFrame(() => {
+            if (typeof window._mdtermSyncResize === 'function') window._mdtermSyncResize();
+            focusTerm();
+        });
     }
     setTimeout(() => {
-        if (fitAddon) {
+        if (typeof window._mdtermSyncResize === 'function') {
+            window._mdtermSyncResize();
+        } else if (fitAddon) {
             try { fitAddon.fit(); } catch (e) {}
         }
         focusTerm();
     }, 60);
-    setTimeout(focusTerm, 150);
-    setTimeout(focusTerm, 300);
-    setTimeout(focusTerm, 600);
+    setTimeout(() => {
+        if (typeof window._mdtermSyncResize === 'function') window._mdtermSyncResize();
+        focusTerm();
+    }, 150);
+    setTimeout(() => {
+        if (typeof window._mdtermSyncResize === 'function') window._mdtermSyncResize();
+        focusTerm();
+    }, 300);
+    setTimeout(() => {
+        if (typeof window._mdtermSyncResize === 'function') window._mdtermSyncResize();
+        focusTerm();
+    }, 600);
 
     // Clicking anywhere in the container or terminal pane focuses the terminal
     const handlePaneClick = () => {
@@ -853,15 +898,37 @@ export function initTerminalSession(containerId) {
         const invoke = window.__TAURI__.core.invoke;
         const event = window.__TAURI__.event;
 
-        const cols = term.cols || 80;
-        const rows = term.rows || 24;
-        invoke('pty_spawn', { cols, rows }).catch(err => {
+        if (fitAddon) {
+            try { fitAddon.fit(); } catch (e) {}
+        }
+        const initialCols = term.cols && term.cols > 2 ? term.cols : 80;
+        const initialRows = term.rows && term.rows > 1 ? term.rows : 24;
+        window._mdtermLastCols = initialCols;
+        window._mdtermLastRows = initialRows;
+
+        invoke('pty_spawn', { cols: initialCols, rows: initialRows }).catch(err => {
             term.write('\r\n\x1b[31mFailed to spawn shell: ' + err + '\x1b[0m\r\n');
         });
+
+        const syncPtyResize = () => {
+            if (!fitAddon || !term) return;
+            try {
+                fitAddon.fit();
+                const cols = term.cols;
+                const rows = term.rows;
+                if (cols > 2 && rows > 1 && (cols !== window._mdtermLastCols || rows !== window._mdtermLastRows)) {
+                    window._mdtermLastCols = cols;
+                    window._mdtermLastRows = rows;
+                    invoke('pty_resize', { cols, rows }).catch(() => {});
+                }
+            } catch (e) {}
+        };
+        window._mdtermSyncResize = syncPtyResize;
 
         invoke('get_terminal_config').then(loadedCfg => {
             if (loadedCfg) {
                 applyTerminalConfig(loadedCfg);
+                syncPtyResize();
             }
         }).catch(err => {
             console.error('Failed to get terminal config:', err);
@@ -874,6 +941,7 @@ export function initTerminalSession(containerId) {
             event.listen('terminal-config-changed', (e) => {
                 if (e.payload) {
                     applyTerminalConfig(e.payload);
+                    syncPtyResize();
                     window.dispatchEvent(new CustomEvent('mdterm-config-changed', { detail: e.payload }));
                 }
             });
@@ -883,20 +951,11 @@ export function initTerminalSession(containerId) {
             invoke('pty_write', { data }).catch(() => {});
         });
 
-        const handleResize = () => {
-            if (fitAddon) {
-                try {
-                    fitAddon.fit();
-                    invoke('pty_resize', { cols: term.cols, rows: term.rows }).catch(() => {});
-                } catch (e) {}
-            }
-        };
-
         const ro = new ResizeObserver(() => {
-            handleResize();
+            syncPtyResize();
         });
         ro.observe(container);
-        window.addEventListener('resize', handleResize);
+        window.addEventListener('resize', syncPtyResize);
     } else {
         term.write('\x1b[1;36m=== mdterm Terminal Emulator ===\x1b[0m\r\n');
         term.write('\x1b[90mRunning in browser preview. In Tauri desktop app, a native shell runs here.\x1b[0m\r\n\r\n$ ');

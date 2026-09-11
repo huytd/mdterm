@@ -45,7 +45,7 @@ impl Default for TerminalConfig {
                 "JetBrains Mono, Menlo, Monaco, Consolas, \"Courier New\", monospace".to_string(),
             ),
             font_size: Some(13.0),
-            character_height: Some(1.25),
+            character_height: Some(1.0),
         }
     }
 }
@@ -274,7 +274,7 @@ font_family: 'JetBrains Mono, Menlo, Monaco, Consolas, "Courier New", monospace'
 font_size: 13
 
 # Terminal character height (line height multiplier, e.g. 1.0, 1.25, 1.5)
-character_height: 1.25
+character_height: 1.0
 "##;
 
 pub fn ensure_default_config_exists() -> Result<PathBuf, String> {
@@ -406,7 +406,7 @@ font_size: 16
             Some("JetBrains Mono, Menlo, Monaco, Consolas, \"Courier New\", monospace".to_string())
         );
         assert_eq!(cfg.font_size, Some(16.0));
-        assert_eq!(cfg.character_height, Some(1.25));
+        assert_eq!(cfg.character_height, Some(1.0));
     }
 
     #[test]
@@ -437,7 +437,7 @@ font_size: 14
             Some("JetBrains Mono, Menlo, Monaco, Consolas, \"Courier New\", monospace".to_string())
         );
         assert_eq!(cfg.font_size, Some(13.0));
-        assert_eq!(cfg.character_height, Some(1.25));
+        assert_eq!(cfg.character_height, Some(1.0));
     }
 
     #[test]
