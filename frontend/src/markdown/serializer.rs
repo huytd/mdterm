@@ -14,13 +14,7 @@ pub fn html_to_markdown(html: &str) -> String {
     }
 
     // 1. Remove code block headers (which contain the copy button, view switcher, and language tag)
-    while let Some(start) = clean_html.find("<div class=\"code-block-header\"") {
-        if let Some(end) = clean_html[start..].find("</div>") {
-            clean_html.replace_range(start..start + end + 6, "");
-        } else {
-            break;
-        }
-    }
+    crate::html::remove_matched_div(&mut clean_html, "<div class=\"code-block-header\"");
 
     // 2. Normalize checkboxes
     // Checked checkbox
@@ -53,11 +47,11 @@ pub fn html_to_markdown(html: &str) -> String {
     // 3. Strip table and code wrapper divs
     let unwrapped_html = processed_html
         .replace("<div class=\"table-responsive\">", "")
+        .replace("</table></div>", "</table>")
         .replace("<div class=\"code-block-wrapper mermaid-block-wrapper\" data-lang=\"mermaid\">", "")
         .replace("<div class=\"code-block-wrapper\">", "")
         .replace("style=\"display: none;\"", "")
-        .replace("class=\"mermaid-code-pre\"", "")
-        .replace("</div>", "");
+        .replace("class=\"mermaid-code-pre\"", "");
 
     // 4. Convert using htmd
     let converter = HtmlToMarkdown::new();
@@ -70,16 +64,23 @@ pub fn html_to_markdown(html: &str) -> String {
     // Unescape task list markers
     md = md.replace(r"\[x\]", "[x]").replace(r"\[ \]", "[ ]");
 
-    // Fix task list bullet items to standard markdown format: `* [x]` or `- [x]`
+    // Fix task list bullet items to standard markdown format: `- [x]` or `- [ ]`
     let mut final_lines = Vec::new();
     for line in md.lines() {
         let trimmed = line.trim_start();
-        if trimmed.starts_with("*   [x]") || trimmed.starts_with("-   [x]") {
-            let indent = &line[..line.len() - trimmed.len()];
-            final_lines.push(format!("{}- [x] {}", indent, &trimmed[7..]));
-        } else if trimmed.starts_with("*   [ ]") || trimmed.starts_with("-   [ ]") {
-            let indent = &line[..line.len() - trimmed.len()];
-            final_lines.push(format!("{}- [ ] {}", indent, &trimmed[7..]));
+        let indent = &line[..line.len() - trimmed.len()];
+        if let Some(rest) = trimmed.strip_prefix("- [x]")
+            .or_else(|| trimmed.strip_prefix("* [x]"))
+            .or_else(|| trimmed.strip_prefix("-   [x]"))
+            .or_else(|| trimmed.strip_prefix("*   [x]"))
+        {
+            final_lines.push(format!("{}- [x] {}", indent, rest.trim_start()));
+        } else if let Some(rest) = trimmed.strip_prefix("- [ ]")
+            .or_else(|| trimmed.strip_prefix("* [ ]"))
+            .or_else(|| trimmed.strip_prefix("-   [ ]"))
+            .or_else(|| trimmed.strip_prefix("*   [ ]"))
+        {
+            final_lines.push(format!("{}- [ ] {}", indent, rest.trim_start()));
         } else {
             final_lines.push(line.to_string());
         }
@@ -104,5 +105,90 @@ mod tests {
         assert!(converted_md.contains("```mermaid"));
         assert!(converted_md.contains("graph TD"));
         assert!(converted_md.contains("A[Start] --> B[End]"));
+    }
+
+    #[test]
+    fn test_nested_unclosed_divs() {
+        let mut s = String::new();
+        for i in 0..2500 {
+            s.push_str(&format!("<div>Line {}: this is some long content to make it 40KB+</div>", i));
+        }
+        assert!(s.len() > 40000);
+        println!("Input length: {}", s.len());
+        let md = html_to_markdown(&s);
+        println!("Converted length: {}", md.len());
+        assert!(md.contains("Line 0"));
+        assert!(md.contains("Line 2499"));
+    }
+
+    #[test]
+    fn test_pasted_markdown_in_divs() {
+        let html = "<div># My Heading</div><div>Some text</div><div>* bullet 1</div>";
+        let md = html_to_markdown(html);
+        println!("Converted markdown:\n{}", md);
+    }
+
+    #[test]
+    fn test_code_block_roundtrip() {
+        let original_md = "```rust\nfn main() {\n    println!(\"hello\");\n}\n```";
+        let html = markdown_to_html(original_md, true);
+        assert!(html.contains("code-block-wrapper"));
+        assert!(html.contains("code-block-header"));
+
+        let converted_md = html_to_markdown(&html);
+        assert!(converted_md.contains("```rust"));
+        assert!(converted_md.contains("fn main()"));
+        assert!(converted_md.contains("println!(\"hello\")"));
+    }
+
+    #[test]
+    fn test_table_roundtrip() {
+        let original_md = "| Col 1 | Col 2 |\n|---|---|\n| Val 1 | Val 2 |";
+        let html = markdown_to_html(original_md, true);
+        assert!(html.contains("table-responsive"));
+        assert!(html.contains("md-table"));
+
+        let converted_md = html_to_markdown(&html);
+        assert!(converted_md.contains("Col 1"));
+        assert!(converted_md.contains("Col 2"));
+        assert!(converted_md.contains("Val 1"));
+        assert!(converted_md.contains("Val 2"));
+    }
+
+    #[test]
+    fn test_large_complex_document_roundtrip() {
+        let mut original_md = String::new();
+        original_md.push_str("# Large Document Test\n\n");
+        for i in 0..500 {
+            original_md.push_str(&format!("## Section {}\n\nParagraph for section {} with **bold** and *italic* text.\n\n", i, i));
+            if i % 10 == 0 {
+                original_md.push_str("```rust\nfn test() {\n    let x = 1;\n}\n```\n\n");
+            }
+            if i % 20 == 0 {
+                original_md.push_str("| Col A | Col B |\n|---|---|\n| Data 1 | Data 2 |\n\n");
+            }
+            if i % 15 == 0 {
+                original_md.push_str("- [x] Done item\n- [ ] Todo item\n\n");
+            }
+        }
+        assert!(original_md.len() >= 40000);
+        println!("Original markdown length: {} bytes", original_md.len());
+
+        let html = markdown_to_html(&original_md, true);
+        println!("Rendered HTML length: {} bytes", html.len());
+
+        let converted_md = html_to_markdown(&html);
+        println!("Converted markdown length: {} bytes", converted_md.len());
+
+        assert!(converted_md.contains("# Large Document Test"));
+        assert!(converted_md.contains("## Section 0"));
+        assert!(converted_md.contains("## Section 499"));
+        assert!(converted_md.contains("```rust"));
+        assert!(converted_md.contains("Col A"));
+        if let Some(pos) = converted_md.find("Done item") {
+            println!("Snippet: {:?}", &converted_md[pos.saturating_sub(10)..pos + 20]);
+        }
+        assert!(converted_md.contains("- [x] Done item"));
+        assert!(converted_md.contains("- [ ] Todo item"));
     }
 }

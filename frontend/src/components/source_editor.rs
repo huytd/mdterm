@@ -16,6 +16,16 @@ pub fn SourceEditor(
         text.lines().count().max(1)
     });
 
+    let gutter_html = Memo::new(move |_| {
+        let count = lines_count.get();
+        let mut html = String::with_capacity(count * 38);
+        for i in 1..=count {
+            use std::fmt::Write;
+            let _ = write!(html, "<div class=\"gutter-line-num\">{}</div>", i);
+        }
+        html
+    });
+
     let handle_input = move |ev: web_sys::Event| {
         let val = event_target_value(&ev);
         content.set(val.clone());
@@ -53,14 +63,11 @@ pub fn SourceEditor(
 
     view! {
         <div class="source-editor-container">
-            <div node_ref=gutter_ref class="source-gutter">
-                {move || {
-                    let count = lines_count.get();
-                    (1..=count)
-                        .map(|i| view! { <div class="gutter-line-num">{i}</div> })
-                        .collect::<Vec<_>>()
-                }}
-            </div>
+            <div
+                node_ref=gutter_ref
+                class="source-gutter"
+                inner_html=move || gutter_html.get()
+            ></div>
 
             <textarea
                 node_ref=textarea_ref

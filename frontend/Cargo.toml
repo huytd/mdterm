@@ -46,6 +46,8 @@ features = [
     "HtmlAnchorElement",
     "CustomEvent",
     "Event",
+    "ClipboardEvent",
+    "DataTransfer",
     "ScrollIntoViewOptions",
     "ScrollLogicalPosition",
     "ScrollBehavior",

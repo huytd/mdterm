@@ -362,8 +362,11 @@ fn pty_get_cwd(state: State<PtyState>) -> Result<String, String> {
 fn pty_write(state: State<PtyState>, data: String) -> Result<(), String> {
     let mut sess = state.session.lock().map_err(|_| "Lock error".to_string())?;
     if let Some(session) = sess.as_mut() {
-        session.writer.write_all(data.as_bytes())
-            .map_err(|e| format!("Write error: {}", e))?;
+        let bytes = data.as_bytes();
+        for chunk in bytes.chunks(4096) {
+            session.writer.write_all(chunk)
+                .map_err(|e| format!("Write error: {}", e))?;
+        }
         session.writer.flush()
             .map_err(|e| format!("Flush error: {}", e))?;
         Ok(())

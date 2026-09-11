@@ -163,6 +163,47 @@ pub fn WysiwygEditor(
         }
     };
 
+    let handle_paste = move |ev: web_sys::Event| {
+        if let Ok(clip_ev) = ev.dyn_into::<web_sys::ClipboardEvent>() {
+            if let Some(clipboard) = clip_ev.clipboard_data() {
+                let is_h = is_html_sig.get();
+                if !is_h {
+                    let html_data = clipboard.get_data("text/html").unwrap_or_default();
+                    let plain_data = clipboard.get_data("text/plain").unwrap_or_default();
+
+                if html_data.trim().is_empty() && !plain_data.is_empty() {
+                    let has_markdown_or_multiline = plain_data.contains('\n')
+                        || plain_data.starts_with("# ")
+                        || plain_data.starts_with("## ")
+                        || plain_data.starts_with("### ")
+                        || plain_data.starts_with("- ")
+                        || plain_data.starts_with("* ")
+                        || plain_data.starts_with("> ")
+                        || plain_data.starts_with("```")
+                        || plain_data.contains("```")
+                        || plain_data.contains("| ");
+
+                    if has_markdown_or_multiline {
+                        clip_ev.prevent_default();
+                        let rendered = markdown_to_html(&plain_data, true);
+                        exec_editor_cmd("insertHTML", Some(&rendered));
+                        crate::tauri_bridge::render_mermaid_diagrams();
+
+                        if let Some(el) = editor_ref.get() {
+                            let raw_el: &HtmlElement = el.as_ref();
+                            let html = raw_el.inner_html();
+                            is_internal_update.set_value(true);
+                            let md = html_to_markdown(&html);
+                            content.set(md.clone());
+                            on_change.run(md);
+                        }
+                    }
+                }
+            }
+        }
+    }
+};
+
     view! {
         <div class="wysiwyg-container">
             <div
@@ -172,6 +213,7 @@ pub fn WysiwygEditor(
                 spellcheck="false"
                 attr:data-placeholder=move || if is_html_sig.get() { "Start typing HTML content or press '/' for commands..." } else { "Start typing or press '/' for commands..." }
                 on:input=handle_input
+                on:paste=handle_paste
                 on:click=handle_click
                 on:keydown=handle_keydown
             ></div>

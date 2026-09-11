@@ -227,6 +227,41 @@ pub fn is_html_content(content: &str) -> bool {
         || (lower.starts_with("<p>") && lower.contains("</p>"))
 }
 
+/// Helper to remove a matching `<div...>` ... `</div>` block by tracking opening and closing `<div>` tag depth.
+pub fn remove_matched_div(html: &mut String, start_pattern: &str) {
+    while let Some(start) = html.find(start_pattern) {
+        let after_start = start + start_pattern.len();
+        let bytes = html.as_bytes();
+        let mut depth = 1;
+        let mut i = after_start;
+        let mut end_pos = None;
+
+        while i < bytes.len() {
+            if html[i..].starts_with("<div") {
+                let next_char = bytes.get(i + 4).copied().unwrap_or(b' ');
+                if next_char == b' ' || next_char == b'>' || next_char == b'/' {
+                    depth += 1;
+                }
+            } else if html[i..].starts_with("</div>") {
+                depth -= 1;
+                if depth == 0 {
+                    end_pos = Some(i + 6);
+                    break;
+                }
+            }
+            i += 1;
+        }
+
+        if let Some(end) = end_pos {
+            html.replace_range(start..end, "");
+        } else if let Some(tag_end) = html[start..].find('>') {
+            html.replace_range(start..start + tag_end + 1, "");
+        } else {
+            break;
+        }
+    }
+}
+
 /// Cleans temporary editor artifacts from innerHTML before storing as document content.
 pub fn clean_html_editor_output(html: &str) -> String {
     let mut clean = html.to_string();
@@ -242,13 +277,7 @@ pub fn clean_html_editor_output(html: &str) -> String {
     }
 
     // 2. Remove code block headers (copy button, switcher, language tag)
-    while let Some(start) = clean.find("<div class=\"code-block-header\"") {
-        if let Some(end) = clean[start..].find("</div>") {
-            clean.replace_range(start..start + end + 6, "");
-        } else {
-            break;
-        }
-    }
+    remove_matched_div(&mut clean, "<div class=\"code-block-header\"");
 
     // 3. Remove display: none added to code block pre when mermaid preview is active
     clean = clean.replace("style=\"display: none;\"", "");
