@@ -548,6 +548,45 @@ export function initTerminalSession(containerId) {
         return '';
     };
 
+    // Wrap term.paste with deduplication to prevent double pasting from simultaneous keydown and paste events.
+    const originalPaste = term.paste.bind(term);
+    let lastPasteTime = 0;
+    let lastPasteText = '';
+    term.paste = (data) => {
+        if (!data) return;
+        const now = Date.now();
+        if (data === lastPasteText && (now - lastPasteTime) < 250) {
+            return;
+        }
+        lastPasteTime = now;
+        lastPasteText = data;
+        originalPaste(data);
+    };
+
+    // Capture DOM paste events on terminal container and textarea before xterm's default handler,
+    // ensuring consistent behavior and preventing duplicate paste dispatches.
+    const handleDomPaste = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof e.stopImmediatePropagation === 'function') {
+            e.stopImmediatePropagation();
+        }
+        const text = (e.clipboardData && typeof e.clipboardData.getData === 'function')
+            ? e.clipboardData.getData('text/plain')
+            : '';
+        if (text) {
+            term.paste(text);
+        } else {
+            readClipboardText().then((clipText) => {
+                if (clipText) term.paste(clipText);
+            }).catch(() => {});
+        }
+    };
+    if (term.textarea) {
+        term.textarea.addEventListener('paste', handleDomPaste, true);
+    }
+    container.addEventListener('paste', handleDomPaste, true);
+
     // Use native terminal shortcuts so copy/paste works independently of WebView permissions.
     const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || '');
     term.attachCustomKeyEventHandler((event) => {
@@ -562,6 +601,8 @@ export function initTerminalSession(containerId) {
             (event.shiftKey && key === 'insert');
 
         if (copyShortcut && term.hasSelection()) {
+            event.preventDefault();
+            event.stopPropagation();
             writeClipboardText(term.getSelection()).catch((error) => {
                 console.error('Failed to copy terminal selection:', error);
             });
@@ -569,6 +610,8 @@ export function initTerminalSession(containerId) {
         }
 
         if (pasteShortcut) {
+            event.preventDefault();
+            event.stopPropagation();
             readClipboardText()
                 .then((text) => {
                     if (text) term.paste(text);
