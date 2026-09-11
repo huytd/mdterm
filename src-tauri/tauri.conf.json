@@ -32,6 +32,7 @@
   },
   "bundle": {
     "active": true,
+    "shortDescription": "Terminal emulator with Markdown editor",
     "targets": "all",
     "icon": [
       "icons/32x32.png",
@@ -42,6 +43,10 @@
     ],
     "linux": {
       "deb": {
+        "desktopTemplate": "desktop-template.desktop",
+        "section": "utils"
+      },
+      "rpm": {
         "desktopTemplate": "desktop-template.desktop"
       }
     }

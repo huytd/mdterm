@@ -1,5 +1,7 @@
 [Desktop Entry]
-Categories={{categories}}
+Categories=System;TerminalEmulator;
+GenericName=Terminal Emulator
+Keywords=terminal;prompt;shell;command;commandline;cmd;cli;markdown;editor;
 {{#if comment}}
 Comment={{comment}}
 {{/if}}
