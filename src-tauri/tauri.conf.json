@@ -16,7 +16,7 @@
         "label": "main",
         "title": "mdterm",
         "theme": "Dark",
-        "titleBarStyle": "Transparent",
+        "decorations": false,
         "backgroundColor": "#161b22",
         "width": 1300,
         "height": 860,

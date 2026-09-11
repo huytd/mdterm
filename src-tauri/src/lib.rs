@@ -167,6 +167,67 @@ fn set_window_theme(window: tauri::WebviewWindow, theme: String) -> Result<(), S
 }
 
 #[tauri::command]
+fn window_minimize(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.minimize().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn window_toggle_maximize(window: tauri::WebviewWindow) -> Result<bool, String> {
+    if window.is_maximized().unwrap_or(false) {
+        window.unmaximize().map_err(|e| e.to_string())?;
+        Ok(false)
+    } else {
+        window.maximize().map_err(|e| e.to_string())?;
+        Ok(true)
+    }
+}
+
+#[tauri::command]
+fn window_is_maximized(window: tauri::WebviewWindow) -> Result<bool, String> {
+    window.is_maximized().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn window_close(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.close().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn window_start_dragging(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.start_dragging().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn window_start_resize(window: tauri::Window, direction: String) -> Result<(), String> {
+    let dir = match direction.as_str() {
+        "East" => tauri_runtime::ResizeDirection::East,
+        "North" => tauri_runtime::ResizeDirection::North,
+        "NorthEast" => tauri_runtime::ResizeDirection::NorthEast,
+        "NorthWest" => tauri_runtime::ResizeDirection::NorthWest,
+        "South" => tauri_runtime::ResizeDirection::South,
+        "SouthEast" => tauri_runtime::ResizeDirection::SouthEast,
+        "SouthWest" => tauri_runtime::ResizeDirection::SouthWest,
+        "West" => tauri_runtime::ResizeDirection::West,
+        _ => return Err(format!("Invalid direction: {}", direction)),
+    };
+    window.start_resize_dragging(dir).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn window_set_size(window: tauri::WebviewWindow, width: u32, height: u32) -> Result<(), String> {
+    window.set_size(tauri::PhysicalSize::new(width, height)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn window_get_size(window: tauri::WebviewWindow) -> Result<(u32, u32), String> {
+    let size = window.outer_size().map_err(|e| e.to_string())?;
+    Ok((size.width, size.height))
+}
+
+
+
+
+#[tauri::command]
 fn get_cli_file() -> Option<String> {
     let args: Vec<String> = std::env::args().collect();
     for arg in args.into_iter().skip(1) {
@@ -243,19 +304,18 @@ fn pty_spawn(app: AppHandle, state: State<PtyState>, cols: u16, rows: u16) -> Re
         loop {
             match reader.read(&mut buffer) {
                 Ok(0) => {
-                    let _ = app.emit("pty-output", "\r\n[Process completed]\r\n");
                     break;
                 }
                 Ok(n) => {
                     let text = String::from_utf8_lossy(&buffer[..n]).to_string();
                     let _ = app.emit("pty-output", text);
                 }
-                Err(e) => {
-                    log::warn!("PTY read error: {}", e);
+                Err(_) => {
                     break;
                 }
             }
         }
+        app.exit(0);
     });
 
     Ok(())
@@ -392,8 +452,17 @@ pub fn run() {
             pty_resize,
             get_cli_file,
             get_terminal_config,
-            get_config_path
+            get_config_path,
+            window_minimize,
+            window_toggle_maximize,
+            window_is_maximized,
+            window_close,
+            window_start_dragging,
+            window_start_resize,
+            window_set_size,
+            window_get_size
         ])
+
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -94,6 +94,76 @@ export async function closeRemoteSession() {
     return false;
 }
 
+export async function windowMinimize() {
+    if (window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function') {
+        try {
+            return await window.__TAURI__.core.invoke('window_minimize');
+        } catch (e) {
+            return await window.__TAURI__.core.invoke('plugin:window|minimize').catch(() => {});
+        }
+    }
+}
+
+export async function windowToggleMaximize() {
+    if (window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function') {
+        try {
+            return await window.__TAURI__.core.invoke('window_toggle_maximize');
+        } catch (e) {
+            const isMax = await window.__TAURI__.core.invoke('plugin:window|is_maximized').catch(() => false);
+            if (isMax) {
+                await window.__TAURI__.core.invoke('plugin:window|unmaximize').catch(() => {});
+                return false;
+            } else {
+                await window.__TAURI__.core.invoke('plugin:window|maximize').catch(() => {});
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+export async function windowIsMaximized() {
+    if (window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function') {
+        try {
+            return await window.__TAURI__.core.invoke('window_is_maximized');
+        } catch (e) {
+            return await window.__TAURI__.core.invoke('plugin:window|is_maximized').catch(() => false);
+        }
+    }
+    return false;
+}
+
+export async function windowClose() {
+    if (window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function') {
+        try {
+            return await window.__TAURI__.core.invoke('window_close');
+        } catch (e) {
+            return await window.__TAURI__.core.invoke('plugin:window|close').catch(() => {});
+        }
+    }
+}
+
+export async function windowStartDragging() {
+    if (window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function') {
+        try {
+            return await window.__TAURI__.core.invoke('window_start_dragging');
+        } catch (e) {
+            return await window.__TAURI__.core.invoke('plugin:window|start_dragging').catch(() => {});
+        }
+    }
+}
+
+export async function windowStartResize(direction) {
+    if (window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function') {
+        try {
+            return await window.__TAURI__.core.invoke('window_start_resize', { direction });
+        } catch (e) {
+            return await window.__TAURI__.core.invoke('plugin:window|start_resize_dragging', { value: direction }).catch(() => {});
+        }
+    }
+}
+
+
 const TERMINAL_THEMES = {
     dark: {
         background: '#0f141c',
@@ -971,6 +1041,62 @@ extern "C" {
 
     #[wasm_bindgen(js_name = closeRemoteSession, catch)]
     async fn closeRemoteSession() -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue>;
+
+    #[wasm_bindgen(js_name = windowMinimize)]
+    pub async fn window_minimize_js();
+
+    #[wasm_bindgen(js_name = windowToggleMaximize)]
+    pub async fn window_toggle_maximize_js() -> wasm_bindgen::JsValue;
+
+    #[wasm_bindgen(js_name = windowIsMaximized)]
+    pub async fn window_is_maximized_js() -> wasm_bindgen::JsValue;
+
+    #[wasm_bindgen(js_name = windowClose)]
+    pub async fn window_close_js();
+
+    #[wasm_bindgen(js_name = windowStartDragging)]
+    pub async fn window_start_dragging_js();
+
+    #[wasm_bindgen(js_name = windowStartResize)]
+    pub async fn window_start_resize_js(direction: &str);
+}
+
+#[allow(dead_code)]
+pub fn window_minimize() {
+    leptos::task::spawn_local(async {
+        window_minimize_js().await;
+    });
+}
+
+pub async fn window_toggle_maximize() -> bool {
+    let val = window_toggle_maximize_js().await;
+    val.as_bool().unwrap_or(false)
+}
+
+pub async fn window_is_maximized() -> bool {
+    let val = window_is_maximized_js().await;
+    val.as_bool().unwrap_or(false)
+}
+
+#[allow(dead_code)]
+pub fn window_close() {
+    leptos::task::spawn_local(async {
+        window_close_js().await;
+    });
+}
+
+
+pub fn window_start_dragging() {
+    leptos::task::spawn_local(async {
+        window_start_dragging_js().await;
+    });
+}
+
+pub fn window_start_resize(direction: &str) {
+    let dir = direction.to_string();
+    leptos::task::spawn_local(async move {
+        window_start_resize_js(&dir).await;
+    });
 }
 
 pub async fn send_remote_save(path: &str, content: &str) -> Result<(), String> {
@@ -983,6 +1109,7 @@ pub async fn send_remote_save(path: &str, content: &str) -> Result<(), String> {
 pub async fn close_remote_session() {
     let _ = closeRemoteSession().await;
 }
+
 
 pub async fn set_window_theme(theme: &str) -> Result<(), String> {
     if !is_tauri_env() {

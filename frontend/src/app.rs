@@ -5,7 +5,7 @@ use web_sys::{KeyboardEvent, MouseEvent};
 use crate::components::samples::WELCOME_MD;
 use crate::components::{
     DocumentPreview, EditorHeader, FloatingControls, Modals, SourceEditor, SplitEditor,
-    TerminalPane, WysiwygEditor,
+    TerminalPane, TitleBar, WindowResizeHandles, WysiwygEditor,
 };
 use crate::html::{self, HtmlEnvelope};
 use crate::markdown::{html_to_markdown, markdown_to_html};
@@ -45,6 +45,29 @@ pub fn App() -> impl IntoView {
     let is_dirty = RwSignal::new(false);
     let is_remote_doc = RwSignal::new(false);
     let current_theme = RwSignal::new(load_persisted_theme());
+    let is_maximized = RwSignal::new(false);
+
+    // Initial check for window maximized state
+    leptos::task::spawn_local(async move {
+        let max = tauri_bridge::window_is_maximized().await;
+        is_maximized.set(max);
+    });
+
+    // Synchronize maximized state and fit terminal on window resize
+    Effect::new(move |_| {
+        if let Some(win) = web_sys::window() {
+            let cb = wasm_bindgen::closure::Closure::wrap(Box::new(move |_: web_sys::Event| {
+                fit_terminal_session();
+                leptos::task::spawn_local(async move {
+                    let max = tauri_bridge::window_is_maximized().await;
+                    is_maximized.set(max);
+                });
+            }) as Box<dyn FnMut(_)>);
+
+            let _ = win.add_event_listener_with_callback("resize", cb.as_ref().unchecked_ref());
+            cb.forget();
+        }
+    });
 
     let is_html_doc = Memo::new(move |_| {
         html::is_html_file(&active_filename.get(), &active_content.get())
@@ -578,12 +601,26 @@ pub fn App() -> impl IntoView {
 
     view! {
         <div
-            class=move || format!("app-root {}", current_theme.get().class_name())
+            class=move || {
+                let mut c = format!("app-root {}", current_theme.get().class_name());
+                if is_maximized.get() {
+                    c.push_str(" is-maximized");
+                }
+                c
+            }
             on:mousemove=on_mouse_move
             on:mouseup=on_mouse_up
             on:keydown=on_window_keydown
             tabindex="-1"
         >
+            <TitleBar
+                active_filename=active_filename.into()
+                is_dirty=is_dirty.into()
+                is_editor_open=is_editor_open.into()
+                is_maximized=is_maximized
+                current_theme=current_theme
+            />
+
             <div class=move || {
                 if editor_position.get() == EditorPosition::Left {
                     "app-workspace pos-editor-left"
@@ -737,6 +774,9 @@ pub fn App() -> impl IntoView {
                 on_replace_all=handle_replace_all
                 on_slash_select=handle_slash_select
             />
+
+            <WindowResizeHandles is_maximized=is_maximized.into() />
         </div>
     }
+
 }
