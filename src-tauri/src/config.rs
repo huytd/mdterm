@@ -42,7 +42,7 @@ impl Default for TerminalConfig {
         Self {
             theme: Some(ThemeValue::Name("dark".to_string())),
             font_family: Some(
-                "JetBrains Mono, Menlo, Monaco, Consolas, \"Courier New\", monospace".to_string(),
+                "\"JetBrains Mono\", Menlo, Monaco, Consolas, \"Courier New\", monospace".to_string(),
             ),
             font_size: Some(13.0),
             character_height: Some(1.0),
@@ -253,6 +253,19 @@ pub fn get_config_path() -> Option<PathBuf> {
     if yaml.exists() {
         return Some(yaml);
     }
+
+    if let Some(cfg_dir) = dirs::config_dir() {
+        let alt_dir = cfg_dir.join("mdterm");
+        let alt_yml = alt_dir.join("config.yml");
+        if alt_yml.exists() {
+            return Some(alt_yml);
+        }
+        let alt_yaml = alt_dir.join("config.yaml");
+        if alt_yaml.exists() {
+            return Some(alt_yaml);
+        }
+    }
+
     Some(yml)
 }
 
@@ -268,7 +281,7 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r##"# mdterm terminal configuration
 theme: "dark"
 
 # Terminal font family
-font_family: 'JetBrains Mono, Menlo, Monaco, Consolas, "Courier New", monospace'
+font_family: '"JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace'
 
 # Terminal font size in points/pixels
 font_size: 13
@@ -403,7 +416,7 @@ font_size: 16
         assert_eq!(cfg.theme, Some(ThemeValue::Name("dark".to_string())));
         assert_eq!(
             cfg.font_family,
-            Some("JetBrains Mono, Menlo, Monaco, Consolas, \"Courier New\", monospace".to_string())
+            Some("\"JetBrains Mono\", Menlo, Monaco, Consolas, \"Courier New\", monospace".to_string())
         );
         assert_eq!(cfg.font_size, Some(16.0));
         assert_eq!(cfg.character_height, Some(1.0));
@@ -434,7 +447,7 @@ font_size: 14
         assert_eq!(cfg.theme, Some(ThemeValue::Name("dark".to_string())));
         assert_eq!(
             cfg.font_family,
-            Some("JetBrains Mono, Menlo, Monaco, Consolas, \"Courier New\", monospace".to_string())
+            Some("\"JetBrains Mono\", Menlo, Monaco, Consolas, \"Courier New\", monospace".to_string())
         );
         assert_eq!(cfg.font_size, Some(13.0));
         assert_eq!(cfg.character_height, Some(1.0));
@@ -471,4 +484,17 @@ character_height: 1.35
 
         let _ = fs::remove_dir_all(&temp_dir);
     }
+
+    #[test]
+    fn test_parse_macos_font_config() {
+        let yaml = r#"
+theme: dark
+font_family: "Menlo, Monaco, monospace"
+font_size: 14
+"#;
+        let cfg = parse_config_yaml(yaml).expect("parse macos font config");
+        assert_eq!(cfg.font_family, Some("Menlo, Monaco, monospace".to_string()));
+        assert_eq!(cfg.font_size, Some(14.0));
+    }
 }
+

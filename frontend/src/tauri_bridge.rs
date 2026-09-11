@@ -378,20 +378,49 @@ export function setTerminalTheme(themeName) {
     } catch (e) {}
 }
 
+export function normalizeFontFamily(str) {
+    if (!str || typeof str !== 'string') return str;
+    return str.split(',')
+        .map(part => part.trim())
+        .filter(part => part.length > 0)
+        .map(part => {
+            if ((part.startsWith('"') && part.endsWith('"')) || (part.startsWith("'") && part.endsWith("'"))) {
+                return part;
+            }
+            const lower = part.toLowerCase();
+            if (['monospace', 'sans-serif', 'serif', 'system-ui', 'cursive', 'fantasy'].includes(lower)) {
+                return lower;
+            }
+            if (/\s/.test(part)) {
+                return `"${part}"`;
+            }
+            return part;
+        })
+        .join(', ');
+}
+
 export function applyTerminalConfig(cfg) {
     if (!cfg) return;
     window._mdtermTerminalConfig = cfg;
     if (cfg.theme) {
         setTerminalTheme(cfg.theme);
     }
+    const rawFont = cfg.font_family || cfg.fontFamily;
+    const normalizedFont = rawFont ? normalizeFontFamily(rawFont) : null;
+    if (normalizedFont) {
+        document.documentElement.style.setProperty('--font-mono', normalizedFont);
+    }
     if (window._mdtermTerminal) {
-        if (cfg.font_family || cfg.fontFamily) {
-            window._mdtermTerminal.options.fontFamily = cfg.font_family || cfg.fontFamily;
+        let fontChanged = false;
+        if (normalizedFont && window._mdtermTerminal.options.fontFamily !== normalizedFont) {
+            window._mdtermTerminal.options.fontFamily = normalizedFont;
+            fontChanged = true;
         }
         if (cfg.font_size || cfg.fontSize) {
             const parsed = Number(cfg.font_size || cfg.fontSize);
-            if (!isNaN(parsed) && parsed > 0) {
+            if (!isNaN(parsed) && parsed > 0 && window._mdtermTerminal.options.fontSize !== parsed) {
                 window._mdtermTerminal.options.fontSize = parsed;
+                fontChanged = true;
             }
         }
         const rawHeight = cfg.character_height || cfg.characterHeight || cfg.line_height || cfg.lineHeight;
@@ -402,9 +431,37 @@ export function applyTerminalConfig(cfg) {
                     const currentFontSize = window._mdtermTerminal.options.fontSize || 13;
                     ch = ch / currentFontSize;
                 }
-                window._mdtermTerminal.options.lineHeight = Math.max(1.0, ch);
+                const lh = Math.max(1.0, ch);
+                if (window._mdtermTerminal.options.lineHeight !== lh) {
+                    window._mdtermTerminal.options.lineHeight = lh;
+                    fontChanged = true;
+                }
             }
         }
+
+        // Re-initialize CanvasAddon if font properties changed, so the texture atlas is rebuilt with the new font
+        if (fontChanged) {
+            if (window._mdtermCanvasAddon && typeof CanvasAddon !== 'undefined' && CanvasAddon.CanvasAddon) {
+                try {
+                    window._mdtermCanvasAddon.dispose();
+                    window._mdtermCanvasAddon = null;
+                    const newCanvas = new CanvasAddon.CanvasAddon();
+                    window._mdtermTerminal.loadAddon(newCanvas);
+                    window._mdtermCanvasAddon = newCanvas;
+                } catch (e) {
+                    console.warn('Failed to reload CanvasAddon on font change:', e);
+                }
+            }
+            if (typeof window._mdtermTerminal.clearTextureAtlas === 'function') {
+                try { window._mdtermTerminal.clearTextureAtlas(); } catch (e) {}
+            }
+            if (typeof window._mdtermTerminal.refresh === 'function') {
+                try {
+                    window._mdtermTerminal.refresh(0, (window._mdtermTerminal.rows || 24) - 1);
+                } catch (e) {}
+            }
+        }
+
         if (typeof window._mdtermSyncResize === 'function') {
             window._mdtermSyncResize();
         } else if (window._mdtermFitAddon) {
@@ -421,7 +478,7 @@ export function applyTerminalConfig(cfg) {
     }
 }
 
-export function initTerminalSession(containerId) {
+export async function initTerminalSession(containerId) {
     const container = document.getElementById(containerId);
     if (!container) return;
 
@@ -442,16 +499,38 @@ export function initTerminalSession(containerId) {
         return;
     }
 
+    const tauriInvoke = window.__TAURI__ && window.__TAURI__.core
+        ? window.__TAURI__.core.invoke
+        : ((window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke) || null);
+    const hasTauri = typeof tauriInvoke === 'function';
+
+    // Fetch terminal config before creating Terminal so correct font and metrics are used from the start
+    if (hasTauri && !window._mdtermTerminalConfig) {
+        try {
+            const loadedCfg = await tauriInvoke('get_terminal_config');
+            if (loadedCfg) {
+                window._mdtermTerminalConfig = loadedCfg;
+            }
+        } catch (e) {
+            console.error('Failed to get terminal config on startup:', e);
+        }
+    }
+
     const cfg = window._mdtermTerminalConfig || {};
     let fontSize = 13;
     if (cfg.font_size || cfg.fontSize) {
         const parsed = Number(cfg.font_size || cfg.fontSize);
         if (!isNaN(parsed) && parsed > 0) fontSize = parsed;
     }
-    let fontFamily = '"Iosevka Term", "JetBrains Mono", "Fira Code", "Cascadia Code", "DejaVu Sans Mono", "Liberation Mono", Menlo, Monaco, Consolas, "Courier New", monospace';
-    if (cfg.font_family || cfg.fontFamily) {
-        fontFamily = cfg.font_family || cfg.fontFamily;
+
+    const defaultFontFamily = '"JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace';
+    let fontFamily = defaultFontFamily;
+    const rawFont = cfg.font_family || cfg.fontFamily;
+    if (rawFont) {
+        fontFamily = normalizeFontFamily(rawFont);
     }
+    document.documentElement.style.setProperty('--font-mono', fontFamily);
+
     let lineHeight = 1.0;
     const rawHeight = cfg.character_height || cfg.characterHeight || cfg.line_height || cfg.lineHeight;
     if (rawHeight !== undefined && rawHeight !== null) {
@@ -486,6 +565,7 @@ export function initTerminalSession(containerId) {
         customGlyphs: true,
         allowTransparency: false
     });
+    window._mdtermTerminal = term;
 
     // Load Unicode 11 addon for accurate glyph widths (nerd fonts, tmux status, emoji)
     if (typeof Unicode11Addon !== 'undefined' && Unicode11Addon.Unicode11Addon) {
@@ -522,11 +602,6 @@ export function initTerminalSession(containerId) {
     if (fitAddon) {
         try { fitAddon.fit(); } catch (e) {}
     }
-
-    const tauriInvoke = window.__TAURI__ && window.__TAURI__.core
-        ? window.__TAURI__.core.invoke
-        : null;
-    const hasTauri = typeof tauriInvoke === 'function';
 
     const writeClipboardText = async (text) => {
         if (hasTauri) {
@@ -1112,7 +1187,7 @@ extern "C" {
     pub fn window_find(query: &str, case_sensitive: bool, backward: bool) -> bool;
 
     #[wasm_bindgen(js_name = initTerminalSession)]
-    pub fn init_terminal_session(container_id: &str);
+    async fn init_terminal_session_js(container_id: &str) -> wasm_bindgen::JsValue;
 
     #[wasm_bindgen(js_name = setTerminalTheme)]
     pub fn set_terminal_theme(theme_name: &str);
@@ -1249,6 +1324,10 @@ pub fn apply_terminal_config(config: &TerminalConfig) {
     if let Ok(val) = serde_wasm_bindgen::to_value(config) {
         apply_terminal_config_js(val);
     }
+}
+
+pub async fn init_terminal_session(container_id: &str) {
+    let _ = init_terminal_session_js(container_id).await;
 }
 
 pub async fn get_terminal_config() -> Result<TerminalConfig, String> {

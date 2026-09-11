@@ -7,8 +7,10 @@ pub fn TerminalPane() -> impl IntoView {
 
     Effect::new(move |_| {
         // Initialize terminal session once mounted
-        init_terminal_session(container_id);
-        focus_terminal_session();
+        leptos::task::spawn_local(async move {
+            init_terminal_session(container_id).await;
+            focus_terminal_session();
+        });
     });
 
     view! {
