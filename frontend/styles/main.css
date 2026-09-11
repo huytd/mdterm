@@ -752,6 +752,9 @@ html, body {
   height: 100%;
   width: 100%;
   padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 .terminal-container .xterm-viewport {

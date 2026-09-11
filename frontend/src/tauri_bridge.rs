@@ -380,23 +380,25 @@ export function setTerminalTheme(themeName) {
 
 export function normalizeFontFamily(str) {
     if (!str || typeof str !== 'string') return str;
-    return str.split(',')
+    const parts = str.split(',')
         .map(part => part.trim())
         .filter(part => part.length > 0)
         .map(part => {
-            if ((part.startsWith('"') && part.endsWith('"')) || (part.startsWith("'") && part.endsWith("'"))) {
-                return part;
+            let clean = part;
+            if ((clean.startsWith('"') && clean.endsWith('"')) || (clean.startsWith("'") && clean.endsWith("'"))) {
+                clean = clean.slice(1, -1).trim();
             }
-            const lower = part.toLowerCase();
-            if (['monospace', 'sans-serif', 'serif', 'system-ui', 'cursive', 'fantasy'].includes(lower)) {
+            const lower = clean.toLowerCase();
+            if (['monospace', 'sans-serif', 'serif', 'system-ui', 'ui-monospace', 'cursive', 'fantasy'].includes(lower)) {
                 return lower;
             }
-            if (/\s/.test(part)) {
-                return `"${part}"`;
-            }
-            return part;
-        })
-        .join(', ');
+            return `"${clean}"`;
+        });
+    const hasGeneric = parts.some(p => ['monospace', 'sans-serif', 'serif', 'system-ui', 'ui-monospace'].includes(p.toLowerCase()));
+    if (!hasGeneric) {
+        parts.push('Menlo', 'Monaco', 'Consolas', '"Courier New"', 'monospace');
+    }
+    return parts.join(', ');
 }
 
 export function applyTerminalConfig(cfg) {
@@ -439,22 +441,8 @@ export function applyTerminalConfig(cfg) {
             }
         }
 
-        // Re-initialize CanvasAddon if font properties changed, so the texture atlas is rebuilt with the new font
+        // Trigger DOM renderer refresh when font properties change
         if (fontChanged) {
-            if (window._mdtermCanvasAddon && typeof CanvasAddon !== 'undefined' && CanvasAddon.CanvasAddon) {
-                try {
-                    window._mdtermCanvasAddon.dispose();
-                    window._mdtermCanvasAddon = null;
-                    const newCanvas = new CanvasAddon.CanvasAddon();
-                    window._mdtermTerminal.loadAddon(newCanvas);
-                    window._mdtermCanvasAddon = newCanvas;
-                } catch (e) {
-                    console.warn('Failed to reload CanvasAddon on font change:', e);
-                }
-            }
-            if (typeof window._mdtermTerminal.clearTextureAtlas === 'function') {
-                try { window._mdtermTerminal.clearTextureAtlas(); } catch (e) {}
-            }
             if (typeof window._mdtermTerminal.refresh === 'function') {
                 try {
                     window._mdtermTerminal.refresh(0, (window._mdtermTerminal.rows || 24) - 1);
@@ -588,16 +576,10 @@ export async function initTerminalSession(containerId) {
 
     term.open(container);
 
-    // Load CanvasAddon for hardware-accelerated, seamless box drawing character rendering
-    if (typeof CanvasAddon !== 'undefined' && CanvasAddon.CanvasAddon) {
-        try {
-            const canvasAddon = new CanvasAddon.CanvasAddon();
-            term.loadAddon(canvasAddon);
-            window._mdtermCanvasAddon = canvasAddon;
-        } catch (e) {
-            console.warn('CanvasAddon failed to load, falling back to DOM renderer:', e);
-        }
-    }
+    // We use xterm.js's built-in DOM renderer. In macOS WebKit (Tauri WKWebView),
+    // CanvasAddon cannot render locally installed fonts due to WebKit canvas font restrictions,
+    // which caused Canvas 2D to fall back to the system monospace font. The DOM renderer
+    // natively supports all user-installed fonts with macOS native CoreText font smoothing.
 
     if (fitAddon) {
         try { fitAddon.fit(); } catch (e) {}
