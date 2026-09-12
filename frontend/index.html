@@ -12,10 +12,17 @@
   <link data-trunk rel="copy-file" href="vendor/xterm-addon-fit.js" />
   <link data-trunk rel="copy-file" href="vendor/xterm-addon-unicode11.js" />
   <link data-trunk rel="copy-file" href="vendor/mermaid.min.js" />
+  <script>
+    if (window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function') {
+      window._mdtermTerminalConfigPromise = window.__TAURI__.core.invoke('get_terminal_config').then(function(cfg) {
+        window._mdtermTerminalConfig = cfg;
+        return cfg;
+      }).catch(function() { return null; });
+    }
+  </script>
   <script src="xterm.js"></script>
   <script src="xterm-addon-fit.js"></script>
   <script src="xterm-addon-unicode11.js"></script>
-  <script src="mermaid.min.js"></script>
 </head>
 <body>
 </body>

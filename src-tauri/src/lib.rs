@@ -167,6 +167,12 @@ fn set_window_theme(window: tauri::WebviewWindow, theme: String) -> Result<(), S
 }
 
 #[tauri::command]
+fn window_show(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.show().map_err(|e| e.to_string())?;
+    window.set_focus().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn window_minimize(window: tauri::WebviewWindow) -> Result<(), String> {
     window.minimize().map_err(|e| e.to_string())
 }
@@ -414,7 +420,13 @@ pub fn run() {
         )
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
-                let _ = window.set_focus();
+                let w = window.clone();
+                // Defensive fallback: ensure window is shown even if frontend init encounters an unexpected issue
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(1500));
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                });
             }
 
             // Ensure config exists and watch for modifications
@@ -459,6 +471,7 @@ pub fn run() {
             get_cli_file,
             get_terminal_config,
             get_config_path,
+            window_show,
             window_minimize,
             window_toggle_maximize,
             window_is_maximized,

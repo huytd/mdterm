@@ -1,5 +1,5 @@
 use leptos::prelude::*;
-use crate::tauri_bridge::{focus_terminal_session, init_terminal_session};
+use crate::tauri_bridge::{focus_terminal_session, init_terminal_session, window_show};
 
 #[component]
 pub fn TerminalPane() -> impl IntoView {
@@ -10,6 +10,7 @@ pub fn TerminalPane() -> impl IntoView {
         leptos::task::spawn_local(async move {
             init_terminal_session(container_id).await;
             focus_terminal_session();
+            window_show();
         });
     });
 

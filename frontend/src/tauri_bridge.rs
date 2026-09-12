@@ -94,6 +94,16 @@ export async function closeRemoteSession() {
     return false;
 }
 
+export async function windowShow() {
+    if (window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function') {
+        try {
+            return await window.__TAURI__.core.invoke('window_show');
+        } catch (e) {
+            return await window.__TAURI__.core.invoke('plugin:window|show').catch(() => {});
+        }
+    }
+}
+
 export async function windowMinimize() {
     if (window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function') {
         try {
@@ -265,8 +275,39 @@ function getTerminalTheme(name) {
     return TERMINAL_THEMES[clean] || TERMINAL_THEMES.dark;
 }
 
+function loadMermaid(callback) {
+    if (typeof mermaid !== 'undefined') {
+        callback();
+        return;
+    }
+    if (!window._mdtermMermaidCallbacks) {
+        window._mdtermMermaidCallbacks = [];
+        const script = document.createElement('script');
+        script.src = 'mermaid.min.js';
+        script.onload = () => {
+            const cbs = window._mdtermMermaidCallbacks || [];
+            window._mdtermMermaidCallbacks = null;
+            cbs.forEach(cb => {
+                try { cb(); } catch (e) { console.error(e); }
+            });
+        };
+        script.onerror = (e) => {
+            window._mdtermMermaidCallbacks = null;
+            console.error('Failed to load mermaid.min.js', e);
+        };
+        document.head.appendChild(script);
+    }
+    window._mdtermMermaidCallbacks.push(callback);
+}
+
 export function renderMermaidDiagrams() {
-    if (typeof mermaid === 'undefined') return;
+    const targets = document.querySelectorAll('.mermaid-preview-target');
+    if (!targets || targets.length === 0) return;
+
+    if (typeof mermaid === 'undefined') {
+        loadMermaid(() => renderMermaidDiagrams());
+        return;
+    }
 
     const themeName = (window._mdtermCurrentTheme || 'dark').toLowerCase().replace(/^theme-/, '');
     const mermaidTheme = themeName === 'light' ? 'default' : (themeName === 'nord' ? 'nord' : 'dark');
@@ -280,7 +321,6 @@ export function renderMermaidDiagrams() {
         });
     } catch (e) {}
 
-    const targets = document.querySelectorAll('.mermaid-preview-target');
     targets.forEach((target, index) => {
         const wrapper = target.closest('.mermaid-block-wrapper');
         const codeEl = wrapper ? wrapper.querySelector('code') : null;
@@ -328,26 +368,28 @@ window._toggleMermaidView = function(btn, mode) {
             preview.style.display = 'flex';
             const target = preview.querySelector('.mermaid-preview-target');
             const codeEl = wrapper.querySelector('code');
-            if (target && codeEl && typeof mermaid !== 'undefined') {
-                const codeText = codeEl.innerText.trim();
-                const id = 'mermaid-svg-' + Date.now() + '-' + Math.floor(Math.random() * 100000);
-                const themeName = (window._mdtermCurrentTheme || 'dark').toLowerCase().replace(/^theme-/, '');
-                const mermaidTheme = themeName === 'light' ? 'default' : (themeName === 'nord' ? 'nord' : 'dark');
-                try {
-                    mermaid.initialize({ startOnLoad: false, theme: mermaidTheme, securityLevel: 'loose' });
-                } catch (e) {}
+            if (target && codeEl) {
+                loadMermaid(() => {
+                    const codeText = codeEl.innerText.trim();
+                    const id = 'mermaid-svg-' + Date.now() + '-' + Math.floor(Math.random() * 100000);
+                    const themeName = (window._mdtermCurrentTheme || 'dark').toLowerCase().replace(/^theme-/, '');
+                    const mermaidTheme = themeName === 'light' ? 'default' : (themeName === 'nord' ? 'nord' : 'dark');
+                    try {
+                        mermaid.initialize({ startOnLoad: false, theme: mermaidTheme, securityLevel: 'loose' });
+                    } catch (e) {}
 
-                try {
-                    mermaid.render(id, codeText)
-                        .then(res => { target.innerHTML = res.svg; })
-                        .catch(err => {
-                            const msg = (err && (err.message || err.str)) || String(err);
-                            target.innerHTML = '<div class="mermaid-error"><div class="mermaid-error-title">⚠️ Mermaid Syntax Error</div><pre class="mermaid-error-msg">' + msg + '</pre></div>';
-                        });
-                } catch (syncErr) {
-                    const msg = (syncErr && (syncErr.message || syncErr.str)) || String(syncErr);
-                    target.innerHTML = '<div class="mermaid-error"><div class="mermaid-error-title">⚠️ Mermaid Syntax Error</div><pre class="mermaid-error-msg">' + msg + '</pre></div>';
-                }
+                    try {
+                        mermaid.render(id, codeText)
+                            .then(res => { target.innerHTML = res.svg; })
+                            .catch(err => {
+                                const msg = (err && (err.message || err.str)) || String(err);
+                                target.innerHTML = '<div class="mermaid-error"><div class="mermaid-error-title">⚠️ Mermaid Syntax Error</div><pre class="mermaid-error-msg">' + msg + '</pre></div>';
+                            });
+                    } catch (syncErr) {
+                        const msg = (syncErr && (syncErr.message || syncErr.str)) || String(syncErr);
+                        target.innerHTML = '<div class="mermaid-error"><div class="mermaid-error-title">⚠️ Mermaid Syntax Error</div><pre class="mermaid-error-msg">' + msg + '</pre></div>';
+                    }
+                });
             }
         }
     }
@@ -495,9 +537,16 @@ export async function initTerminalSession(containerId) {
     // Fetch terminal config before creating Terminal so correct font and metrics are used from the start
     if (hasTauri && !window._mdtermTerminalConfig) {
         try {
-            const loadedCfg = await tauriInvoke('get_terminal_config');
-            if (loadedCfg) {
-                window._mdtermTerminalConfig = loadedCfg;
+            if (window._mdtermTerminalConfigPromise) {
+                const loadedCfg = await window._mdtermTerminalConfigPromise;
+                if (loadedCfg) {
+                    window._mdtermTerminalConfig = loadedCfg;
+                }
+            } else {
+                const loadedCfg = await tauriInvoke('get_terminal_config');
+                if (loadedCfg) {
+                    window._mdtermTerminalConfig = loadedCfg;
+                }
             }
         } catch (e) {
             console.error('Failed to get terminal config on startup:', e);
@@ -584,6 +633,9 @@ export async function initTerminalSession(containerId) {
     if (fitAddon) {
         try { fitAddon.fit(); } catch (e) {}
     }
+
+    // Reveal the window now that the titlebar and terminal are mounted and styled in the DOM
+    windowShow();
 
     const writeClipboardText = async (text) => {
         if (hasTauri) {
@@ -1025,14 +1077,19 @@ export async function initTerminalSession(containerId) {
         };
         window._mdtermSyncResize = syncPtyResize;
 
-        invoke('get_terminal_config').then(loadedCfg => {
-            if (loadedCfg) {
-                applyTerminalConfig(loadedCfg);
-                syncPtyResize();
-            }
-        }).catch(err => {
-            console.error('Failed to get terminal config:', err);
-        });
+        if (window._mdtermTerminalConfig) {
+            applyTerminalConfig(window._mdtermTerminalConfig);
+            syncPtyResize();
+        } else {
+            invoke('get_terminal_config').then(loadedCfg => {
+                if (loadedCfg) {
+                    applyTerminalConfig(loadedCfg);
+                    syncPtyResize();
+                }
+            }).catch(err => {
+                console.error('Failed to get terminal config:', err);
+            });
+        }
 
         if (event && typeof event.listen === 'function') {
             event.listen('pty-output', (e) => {
@@ -1201,6 +1258,9 @@ extern "C" {
     #[wasm_bindgen(js_name = closeRemoteSession, catch)]
     async fn closeRemoteSession() -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue>;
 
+    #[wasm_bindgen(js_name = windowShow)]
+    pub async fn window_show_js();
+
     #[wasm_bindgen(js_name = windowMinimize)]
     pub async fn window_minimize_js();
 
@@ -1218,6 +1278,12 @@ extern "C" {
 
     #[wasm_bindgen(js_name = windowStartResize)]
     pub async fn window_start_resize_js(direction: &str);
+}
+
+pub fn window_show() {
+    leptos::task::spawn_local(async {
+        window_show_js().await;
+    });
 }
 
 #[allow(dead_code)]
