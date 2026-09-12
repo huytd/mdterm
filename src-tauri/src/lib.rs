@@ -139,31 +139,14 @@ fn export_document(path: String, content: String) -> Result<(), String> {
 
 #[tauri::command]
 fn set_window_theme(window: tauri::WebviewWindow, theme: String) -> Result<(), String> {
-    let (native_theme, background_color) = match theme.as_str() {
-        "theme-light" => (
-            tauri::Theme::Light,
-            tauri::window::Color(255, 255, 255, 255),
-        ),
-        "theme-nord" => (
-            tauri::Theme::Dark,
-            tauri::window::Color(59, 66, 82, 255),
-        ),
-        "theme-monokai" => (
-            tauri::Theme::Dark,
-            tauri::window::Color(62, 61, 50, 255),
-        ),
-        _ => (
-            tauri::Theme::Dark,
-            tauri::window::Color(22, 27, 34, 255),
-        ),
+    let native_theme = match theme.as_str() {
+        "theme-light" => tauri::Theme::Light,
+        _ => tauri::Theme::Dark,
     };
 
     window
         .set_theme(Some(native_theme))
-        .map_err(|e| format!("Failed to set window theme: {}", e))?;
-    window
-        .set_background_color(Some(background_color))
-        .map_err(|e| format!("Failed to set window background: {}", e))
+        .map_err(|e| format!("Failed to set window theme: {}", e))
 }
 
 #[tauri::command]
@@ -334,7 +317,7 @@ fn pty_spawn(app: AppHandle, state: State<PtyState>, cols: u16, rows: u16) -> Re
 fn pty_get_cwd(state: State<PtyState>) -> Result<String, String> {
     let sess = state.session.lock().map_err(|_| "Lock error".to_string())?;
     if let Some(session) = sess.as_ref() {
-        if let Some(pid) = session.child_pid {
+        if let Some(_pid) = session.child_pid {
             // Check tmux pane_current_path if tmux is running
             if let Ok(out) = std::process::Command::new("tmux")
                 .args(["display-message", "-p", "#{pane_current_path}"])
