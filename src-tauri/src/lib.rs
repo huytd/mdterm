@@ -317,7 +317,8 @@ fn pty_spawn(app: AppHandle, state: State<PtyState>, cols: u16, rows: u16) -> Re
 fn pty_get_cwd(state: State<PtyState>) -> Result<String, String> {
     let sess = state.session.lock().map_err(|_| "Lock error".to_string())?;
     if let Some(session) = sess.as_ref() {
-        if let Some(_pid) = session.child_pid {
+        if let Some(pid) = session.child_pid {
+            let _ = pid;
             // Check tmux pane_current_path if tmux is running
             if let Ok(out) = std::process::Command::new("tmux")
                 .args(["display-message", "-p", "#{pane_current_path}"])
