@@ -39,80 +39,108 @@ pub fn TitleBar(
                 <span class="titlebar-app-name" data-tauri-drag-region="true">"mdterm"</span>
 
                 <div class="titlebar-tab-strip" data-tauri-drag-region="true">
-                    {move || {
-                        let current_active = active_tab_id.get();
-                        let tab_list = tabs.get();
-                        let count = tab_list.len();
-
-                        tab_list.into_iter().enumerate().map(|(index, tab)| {
+                    <For
+                        each=move || tabs.get()
+                        key=|tab| tab.id.get()
+                        children=move |tab| {
                             let tid = tab.id.get();
                             let tid_close = tid.clone();
                             let tid_select = tid.clone();
-                            let is_active = tid == current_active;
-                            let is_dirty_val = tab.is_dirty.get();
-                            let is_editor = tab.is_editor_open.get();
-                            let num_key = if index < 9 { format!("{}", index + 1) } else { "".to_string() };
+                            let is_dirty_val = tab.is_dirty;
+                            let is_editor = tab.is_editor_open;
+                            let active_filename = tab.active_filename;
 
-                            let display_title = if is_editor {
-                                tab.active_filename.get()
-                            } else {
-                                format!("Terminal {}", index + 1)
+                            let tab_index = Memo::new({
+                                let tid = tid.clone();
+                                move |_| tabs.get().iter().position(|t| t.id.get() == tid).unwrap_or(0)
+                            });
+                            let tab_count = Memo::new(move |_| tabs.get().len());
+                            let is_active = Memo::new({
+                                let tid = tid.clone();
+                                move |_| active_tab_id.get() == tid
+                            });
+
+                            let display_title = move || {
+                                if is_editor.get() {
+                                    active_filename.get()
+                                } else {
+                                    format!("Terminal {}", tab_index.get() + 1)
+                                }
                             };
 
-                            let tab_class = if is_active {
-                                "titlebar-tab active"
-                            } else {
-                                "titlebar-tab"
+                            let tab_class = move || {
+                                if is_active.get() {
+                                    "titlebar-tab active"
+                                } else {
+                                    "titlebar-tab"
+                                }
+                            };
+
+                            let num_key = move || {
+                                let idx = tab_index.get();
+                                if idx < 9 {
+                                    format!("{}", idx + 1)
+                                } else {
+                                    "".to_string()
+                                }
                             };
 
                             view! {
                                 <div
                                     class=tab_class
-                                    title=format!("Tab {} (Super+{})", index + 1, index + 1)
+                                    title=move || format!("Tab {} (Super+{})", tab_index.get() + 1, tab_index.get() + 1)
                                     on:click=move |ev| {
                                         ev.stop_propagation();
                                         on_select_tab.run(tid_select.clone());
                                     }
                                 >
-                                    {if !num_key.is_empty() {
-                                        view! {
-                                            <span class="tab-num-badge">{num_key}</span>
-                                        }.into_any()
-                                    } else {
-                                        ().into_any()
+                                    {move || {
+                                        let nk = num_key();
+                                        if !nk.is_empty() {
+                                            view! {
+                                                <span class="tab-num-badge">{nk}</span>
+                                            }.into_any()
+                                        } else {
+                                            ().into_any()
+                                        }
                                     }}
 
                                     <span class="tab-title-text">{display_title}</span>
 
-                                    {if is_dirty_val {
-                                        view! {
-                                            <span class="tab-dirty-indicator" title="Unsaved changes">"•"</span>
-                                        }.into_any()
-                                    } else {
-                                        ().into_any()
+                                    {move || {
+                                        if is_dirty_val.get() {
+                                            view! {
+                                                <span class="tab-dirty-indicator" title="Unsaved changes">"•"</span>
+                                            }.into_any()
+                                        } else {
+                                            ().into_any()
+                                        }
                                     }}
 
-                                    {if count > 1 {
-                                        view! {
-                                            <button
-                                                type="button"
-                                                class="tab-close-btn"
-                                                title="Close tab (Super+W)"
-                                                on:click=move |ev: MouseEvent| {
-                                                    ev.stop_propagation();
-                                                    on_close_tab.run(tid_close.clone());
-                                                }
-                                            >
-                                                "×"
-                                            </button>
-                                        }.into_any()
-                                    } else {
-                                        ().into_any()
+                                    {move || {
+                                        if tab_count.get() > 1 {
+                                            let tid_c = tid_close.clone();
+                                            view! {
+                                                <button
+                                                    type="button"
+                                                    class="tab-close-btn"
+                                                    title="Close tab (Super+W)"
+                                                    on:click=move |ev: MouseEvent| {
+                                                        ev.stop_propagation();
+                                                        on_close_tab.run(tid_c.clone());
+                                                    }
+                                                >
+                                                    "×"
+                                                </button>
+                                            }.into_any()
+                                        } else {
+                                            ().into_any()
+                                        }
                                     }}
                                 </div>
                             }
-                        }).collect::<Vec<_>>()
-                    }}
+                        }
+                    />
 
                     <button
                         type="button"

@@ -1068,10 +1068,15 @@ export async function initTerminalSession(containerId, sessionId) {
         if (event && typeof event.listen === 'function') {
             event.listen('pty-output-' + sId, (e) => {
                 term.write(e.payload);
-            });
+            }).then(unlisten => {
+                sessionObj.unlistenOutput = unlisten;
+            }).catch(() => {});
+
             event.listen('pty-exit-' + sId, () => {
                 window.dispatchEvent(new CustomEvent('mdterm-pty-exit', { detail: { session_id: sId } }));
-            });
+            }).then(unlisten => {
+                sessionObj.unlistenExit = unlisten;
+            }).catch(() => {});
         }
 
         term.onData(data => {
@@ -1139,6 +1144,8 @@ export function closeTerminalSession(sessionId) {
     if (window._mdtermSessions && window._mdtermSessions[sId]) {
         const sess = window._mdtermSessions[sId];
         try {
+            if (typeof sess.unlistenOutput === 'function') sess.unlistenOutput();
+            if (typeof sess.unlistenExit === 'function') sess.unlistenExit();
             if (sess.ro) sess.ro.disconnect();
             if (sess.term) sess.term.dispose();
         } catch (e) {}

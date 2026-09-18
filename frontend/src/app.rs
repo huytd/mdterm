@@ -115,6 +115,10 @@ pub fn App() -> impl IntoView {
             new_list.remove(idx);
             tabs.set(new_list.clone());
 
+            if previous_tab_id.get().as_deref() == Some(&target_id) {
+                previous_tab_id.set(None);
+            }
+
             if cur == target_id {
                 let next_target = if let Some(prev) = previous_tab_id.get() {
                     if new_list.iter().any(|t| t.id.get() == prev) {
@@ -316,12 +320,12 @@ pub fn App() -> impl IntoView {
 
                     if let Some(sid) = target_session {
                         let cur_tabs = tabs.get();
-                        if cur_tabs.len() > 1 {
-                            if let Some(tab) = cur_tabs.iter().find(|t| t.session_id.get() == sid) {
+                        if let Some(tab) = cur_tabs.iter().find(|t| t.session_id.get() == sid) {
+                            if cur_tabs.len() > 1 {
                                 close_tab_by_id.run(tab.id.get());
+                            } else {
+                                tauri_bridge::window_close();
                             }
-                        } else {
-                            tauri_bridge::window_close();
                         }
                     }
                 }
@@ -749,7 +753,7 @@ pub fn App() -> impl IntoView {
             return;
         }
 
-        // 7. Close Editor / Close Tab: Super + W (NEVER closes window)
+        // 7. Close Editor / Close Tab / Quit App on 1 tab: Super + W
         if is_super && !is_alt && key == "w" {
             ev.prevent_default();
             ev.stop_propagation();
@@ -758,7 +762,11 @@ pub fn App() -> impl IntoView {
                     handle_close_editor.run(());
                 } else if tabs.get().len() > 1 {
                     close_tab_by_id.run(active_tab.id.get());
+                } else {
+                    tauri_bridge::window_close();
                 }
+            } else {
+                tauri_bridge::window_close();
             }
             return;
         }
@@ -864,11 +872,11 @@ pub fn App() -> impl IntoView {
             />
 
             <div class="tabs-workspace-container">
-                {move || {
-                    let current_active = active_tab_id.get();
-                    tabs.get().into_iter().map(|tab| {
+                <For
+                    each=move || tabs.get()
+                    key=|tab| tab.id.get()
+                    children=move |tab| {
                         let tid = tab.id.get();
-                        let is_active = tid == current_active;
                         let sid = tab.session_id.get();
                         let active_filename = tab.active_filename;
                         let is_dirty = tab.is_dirty;
@@ -878,6 +886,11 @@ pub fn App() -> impl IntoView {
                         let active_mode = tab.active_mode;
                         let active_content = tab.active_content;
                         let split_ratio = tab.split_ratio;
+
+                        let is_active = Memo::new({
+                            let tid = tid.clone();
+                            move |_| active_tab_id.get() == tid
+                        });
 
                         let is_html_doc = Memo::new(move |_| {
                             html::is_html_file(&active_filename.get(), &active_content.get())
@@ -891,10 +904,12 @@ pub fn App() -> impl IntoView {
                         let sid_for_fit = sid.clone();
                         let sid_for_close = sid.clone();
 
-                        let workspace_pane_class = if is_active {
-                            "tab-workspace-pane tab-workspace-active"
-                        } else {
-                            "tab-workspace-pane tab-workspace-hidden"
+                        let workspace_pane_class = move || {
+                            if is_active.get() {
+                                "tab-workspace-pane tab-workspace-active"
+                            } else {
+                                "tab-workspace-pane tab-workspace-hidden"
+                            }
                         };
 
                         let workspace_class = move || {
@@ -1020,8 +1035,8 @@ pub fn App() -> impl IntoView {
                                 </div>
                             </div>
                         }
-                    }).collect::<Vec<_>>()
-                }}
+                    }
+                />
             </div>
 
             <Modals
