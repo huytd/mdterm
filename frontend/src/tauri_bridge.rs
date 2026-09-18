@@ -395,6 +395,9 @@ window._toggleMermaidView = function(btn, mode) {
     }
 };
 
+window._mdtermSessions = window._mdtermSessions || {};
+window._mdtermActiveSessionId = '1';
+
 export function setTerminalTheme(themeName) {
     window._mdtermCurrentTheme = themeName;
     let theme;
@@ -403,18 +406,26 @@ export function setTerminalTheme(themeName) {
     } else {
         theme = getTerminalTheme(themeName);
     }
+    if (window._mdtermSessions) {
+        Object.values(window._mdtermSessions).forEach(sess => {
+            if (sess && sess.term) {
+                sess.term.options.theme = theme;
+                try {
+                    if (typeof sess.term.refresh === 'function') {
+                        sess.term.refresh(0, (sess.term.rows || 24) - 1);
+                    }
+                } catch (e) {}
+            }
+        });
+    }
     if (window._mdtermTerminal) {
         window._mdtermTerminal.options.theme = theme;
-        try {
-            if (typeof window._mdtermTerminal.refresh === 'function') {
-                window._mdtermTerminal.refresh(0, (window._mdtermTerminal.rows || 24) - 1);
-            }
-        } catch (e) {}
     }
-    const container = document.getElementById('mdterm-xterm-container');
-    if (container && theme && theme.background) {
-        container.style.backgroundColor = theme.background;
-    }
+    document.querySelectorAll('.terminal-container').forEach(c => {
+        if (c && theme && theme.background) {
+            c.style.backgroundColor = theme.background;
+        }
+    });
     try {
         renderMermaidDiagrams();
     } catch (e) {}
@@ -454,69 +465,72 @@ export function applyTerminalConfig(cfg) {
     if (normalizedFont) {
         document.documentElement.style.setProperty('--font-mono', normalizedFont);
     }
-    if (window._mdtermTerminal) {
-        let fontChanged = false;
-        if (normalizedFont && window._mdtermTerminal.options.fontFamily !== normalizedFont) {
-            window._mdtermTerminal.options.fontFamily = normalizedFont;
-            fontChanged = true;
-        }
-        if (cfg.font_size || cfg.fontSize) {
-            const parsed = Number(cfg.font_size || cfg.fontSize);
-            if (!isNaN(parsed) && parsed > 0 && window._mdtermTerminal.options.fontSize !== parsed) {
-                window._mdtermTerminal.options.fontSize = parsed;
+    if (window._mdtermSessions) {
+        Object.values(window._mdtermSessions).forEach(sess => {
+            if (!sess || !sess.term) return;
+            let fontChanged = false;
+            if (normalizedFont && sess.term.options.fontFamily !== normalizedFont) {
+                sess.term.options.fontFamily = normalizedFont;
                 fontChanged = true;
             }
-        }
-        const rawHeight = cfg.character_height || cfg.characterHeight || cfg.line_height || cfg.lineHeight;
-        if (rawHeight !== undefined && rawHeight !== null) {
-            let ch = Number(rawHeight);
-            if (!isNaN(ch) && ch > 0) {
-                if (ch > 5.0) {
-                    const currentFontSize = window._mdtermTerminal.options.fontSize || 13;
-                    ch = ch / currentFontSize;
-                }
-                const lh = Math.max(1.0, ch);
-                if (window._mdtermTerminal.options.lineHeight !== lh) {
-                    window._mdtermTerminal.options.lineHeight = lh;
+            if (cfg.font_size || cfg.fontSize) {
+                const parsed = Number(cfg.font_size || cfg.fontSize);
+                if (!isNaN(parsed) && parsed > 0 && sess.term.options.fontSize !== parsed) {
+                    sess.term.options.fontSize = parsed;
                     fontChanged = true;
                 }
             }
-        }
-
-        // Trigger DOM renderer refresh when font properties change
-        if (fontChanged) {
-            if (typeof window._mdtermTerminal.refresh === 'function') {
-                try {
-                    window._mdtermTerminal.refresh(0, (window._mdtermTerminal.rows || 24) - 1);
-                } catch (e) {}
-            }
-        }
-
-        if (typeof window._mdtermSyncResize === 'function') {
-            window._mdtermSyncResize();
-        } else if (window._mdtermFitAddon) {
-            try {
-                window._mdtermFitAddon.fit();
-                if (window.__TAURI__) {
-                    const invoke = (window.__TAURI__.core && window.__TAURI__.core.invoke) || (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke);
-                    if (invoke) {
-                        invoke('pty_resize', { cols: window._mdtermTerminal.cols, rows: window._mdtermTerminal.rows }).catch(() => {});
+            const rawHeight = cfg.character_height || cfg.characterHeight || cfg.line_height || cfg.lineHeight;
+            if (rawHeight !== undefined && rawHeight !== null) {
+                let ch = Number(rawHeight);
+                if (!isNaN(ch) && ch > 0) {
+                    if (ch > 5.0) {
+                        const currentFontSize = sess.term.options.fontSize || 13;
+                        ch = ch / currentFontSize;
+                    }
+                    const lh = Math.max(1.0, ch);
+                    if (sess.term.options.lineHeight !== lh) {
+                        sess.term.options.lineHeight = lh;
+                        fontChanged = true;
                     }
                 }
-            } catch (e) {}
-        }
+            }
+            if (fontChanged && typeof sess.term.refresh === 'function') {
+                try {
+                    sess.term.refresh(0, (sess.term.rows || 24) - 1);
+                } catch (e) {}
+            }
+            if (sess.fitAddon) {
+                try { sess.fitAddon.fit(); } catch (e) {}
+            }
+        });
     }
 }
 
-export async function initTerminalSession(containerId) {
+export async function initTerminalSession(containerId, sessionId) {
+    const sId = sessionId || '1';
+    window._mdtermSessions = window._mdtermSessions || {};
+    window._mdtermActiveSessionId = sId;
+
     const container = document.getElementById(containerId);
     if (!container) return;
 
-    if (window._mdtermTerminal) {
+    if (window._mdtermSessions[sId] && window._mdtermSessions[sId].container === container && window._mdtermSessions[sId].term) {
+        const existing = window._mdtermSessions[sId];
+        window._mdtermTerminal = existing.term;
+        window._mdtermFitAddon = existing.fitAddon;
+        if (existing.fitAddon) {
+            try { existing.fitAddon.fit(); } catch (e) {}
+        }
+        return;
+    }
+
+    if (window._mdtermSessions[sId]) {
         try {
-            window._mdtermTerminal.dispose();
+            if (window._mdtermSessions[sId].ro) window._mdtermSessions[sId].ro.disconnect();
+            if (window._mdtermSessions[sId].term) window._mdtermSessions[sId].term.dispose();
         } catch (e) {}
-        window._mdtermTerminal = null;
+        delete window._mdtermSessions[sId];
     }
     container.innerHTML = '';
 
@@ -534,7 +548,6 @@ export async function initTerminalSession(containerId) {
         : ((window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke) || null);
     const hasTauri = typeof tauriInvoke === 'function';
 
-    // Fetch terminal config before creating Terminal so correct font and metrics are used from the start
     if (hasTauri && !window._mdtermTerminalConfig) {
         try {
             if (window._mdtermTerminalConfigPromise) {
@@ -602,9 +615,7 @@ export async function initTerminalSession(containerId) {
         customGlyphs: true,
         allowTransparency: false
     });
-    window._mdtermTerminal = term;
 
-    // Load Unicode 11 addon for accurate glyph widths (nerd fonts, tmux status, emoji)
     if (typeof Unicode11Addon !== 'undefined' && Unicode11Addon.Unicode11Addon) {
         try {
             const unicode11Addon = new Unicode11Addon.Unicode11Addon();
@@ -625,16 +636,10 @@ export async function initTerminalSession(containerId) {
 
     term.open(container);
 
-    // We use xterm.js's built-in DOM renderer. In macOS WebKit (Tauri WKWebView),
-    // CanvasAddon cannot render locally installed fonts due to WebKit canvas font restrictions,
-    // which caused Canvas 2D to fall back to the system monospace font. The DOM renderer
-    // natively supports all user-installed fonts with macOS native CoreText font smoothing.
-
     if (fitAddon) {
         try { fitAddon.fit(); } catch (e) {}
     }
 
-    // Reveal the window now that the titlebar and terminal are mounted and styled in the DOM
     windowShow();
 
     const writeClipboardText = async (text) => {
@@ -657,7 +662,6 @@ export async function initTerminalSession(containerId) {
         return '';
     };
 
-    // Wrap term.paste with deduplication to prevent double pasting from simultaneous keydown and paste events.
     const originalPaste = term.paste.bind(term);
     let lastPasteTime = 0;
     let lastPasteText = '';
@@ -672,8 +676,6 @@ export async function initTerminalSession(containerId) {
         originalPaste(data);
     };
 
-    // Capture DOM paste events on terminal container and textarea before xterm's default handler,
-    // ensuring consistent behavior and preventing duplicate paste dispatches.
     const handleDomPaste = (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -696,12 +698,33 @@ export async function initTerminalSession(containerId) {
     }
     container.addEventListener('paste', handleDomPaste, true);
 
-    // Use native terminal shortcuts so copy/paste works independently of WebView permissions.
     const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || '');
     term.attachCustomKeyEventHandler((event) => {
         if (event.type !== 'keydown') return true;
 
         const key = event.key.toLowerCase();
+        const isSuper = !!(event.metaKey || (typeof event.getModifierState === 'function' && (
+            event.getModifierState('Meta') ||
+            event.getModifierState('Super') ||
+            event.getModifierState('OS')
+        )));
+        const isCtrl = event.ctrlKey || isSuper;
+        const isAlt = event.altKey;
+
+        // Pass through tab switching & theme shortcuts to window listener
+        if (isCtrl && key === 't') {
+            return false;
+        }
+        if (isCtrl && !isAlt && key >= '1' && key <= '9') {
+            return false;
+        }
+        if (isCtrl && key === 'w') {
+            return false;
+        }
+        if (isCtrl && (key === 'n' || key === 'o' || key === 's' || key === 'f' || key === 'm')) {
+            return false;
+        }
+
         const copyShortcut = (isMac && event.metaKey && key === 'c') ||
             (!isMac && event.ctrlKey && event.shiftKey && key === 'c') ||
             (event.ctrlKey && key === 'insert');
@@ -734,8 +757,9 @@ export async function initTerminalSession(containerId) {
         return true;
     });
 
-    const focusTerm = () => {
+    const focusThisTerm = () => {
         try {
+            window._mdtermActiveSessionId = sId;
             const active = document.activeElement;
             const isEditorActive = active && (
                 active.closest('.editor-pane') ||
@@ -758,55 +782,18 @@ export async function initTerminalSession(containerId) {
         } catch (e) {}
     };
 
-    // Immediate & staggered focus and resize sync to ensure terminal layout is accurate upon app start
-    focusTerm();
-    if (typeof requestAnimationFrame === 'function') {
-        requestAnimationFrame(() => {
-            if (typeof window._mdtermSyncResize === 'function') window._mdtermSyncResize();
-            focusTerm();
-        });
-    }
-    setTimeout(() => {
-        if (typeof window._mdtermSyncResize === 'function') {
-            window._mdtermSyncResize();
-        } else if (fitAddon) {
-            try { fitAddon.fit(); } catch (e) {}
-        }
-        focusTerm();
-    }, 60);
-    setTimeout(() => {
-        if (typeof window._mdtermSyncResize === 'function') window._mdtermSyncResize();
-        focusTerm();
-    }, 150);
-    setTimeout(() => {
-        if (typeof window._mdtermSyncResize === 'function') window._mdtermSyncResize();
-        focusTerm();
-    }, 300);
-    setTimeout(() => {
-        if (typeof window._mdtermSyncResize === 'function') window._mdtermSyncResize();
-        focusTerm();
-    }, 600);
+    focusThisTerm();
+    setTimeout(focusThisTerm, 60);
+    setTimeout(focusThisTerm, 150);
 
-    // Clicking anywhere in the container or terminal pane focuses the terminal
     const handlePaneClick = () => {
         const sel = window.getSelection ? window.getSelection().toString() : '';
         if (!sel || sel.length === 0) {
-            focusTerm();
+            focusThisTerm();
         }
     };
     container.addEventListener('click', handlePaneClick);
-    const pane = container.closest('.terminal-pane') || container.parentElement;
-    if (pane && pane !== container) {
-        pane.addEventListener('click', handlePaneClick);
-    }
 
-    // Auto-focus terminal on window focus if no editor/modal is active
-    const handleWindowFocus = () => {
-        focusTerm();
-    };
-    window.addEventListener('focus', handleWindowFocus);
-
-    // Decode UTF-8 string from Base64
     const decodeB64 = (str) => {
         if (!str) return '';
         try {
@@ -821,7 +808,6 @@ export async function initTerminalSession(containerId) {
         }
     };
 
-    // Show animated toast notification
     const showToast = (message) => {
         let toast = document.getElementById('mdterm-toast-container');
         if (!toast) {
@@ -838,7 +824,6 @@ export async function initTerminalSession(containerId) {
         }, 3500);
     };
 
-    // Handler for OSC escape sequences: \x1b]5337;open;NAME_B64;PATH_B64;CONTENT_B64[;SIDE]\x07
     const handleOpenOsc = (data) => {
         try {
             const parts = data.split(';');
@@ -860,20 +845,20 @@ export async function initTerminalSession(containerId) {
 
                 showToast("Opened '" + name + "' in editor (" + (isRemote ? "remote, " : "") + side + ")");
                 window.dispatchEvent(new CustomEvent('mdterm-open-file', {
-                    detail: { name, path, content, side, is_remote: isRemote }
+                    detail: { name, path, content, side, is_remote: isRemote, session_id: sId }
                 }));
                 return true;
             } else if (action === 'saved') {
                 const name = decodeB64(parts[1]) || 'document.md';
                 showToast("✓ Saved '" + name + "' on remote server");
                 window.dispatchEvent(new CustomEvent('mdterm-file-saved', {
-                    detail: { name }
+                    detail: { name, session_id: sId }
                 }));
                 return true;
             } else if (action === 'closed') {
                 const name = decodeB64(parts[1]) || 'document.md';
                 window.dispatchEvent(new CustomEvent('mdterm-remote-closed', {
-                    detail: { name }
+                    detail: { name, session_id: sId }
                 }));
                 return true;
             } else if (action.startsWith('open-file')) {
@@ -881,7 +866,7 @@ export async function initTerminalSession(containerId) {
                 const name = path.split('/').pop() || path;
                 showToast("Opened '" + name + "' in editor (" + side + ")");
                 window.dispatchEvent(new CustomEvent('mdterm-open-file', {
-                    detail: { name, path, content: '', side, is_remote: false }
+                    detail: { name, path, content: '', side, is_remote: false, session_id: sId }
                 }));
                 return true;
             }
@@ -896,16 +881,12 @@ export async function initTerminalSession(containerId) {
         term.parser.registerOscHandler(7777, handleOpenOsc);
         term.parser.registerOscHandler(1337, handleOpenOsc);
 
-        // OSC 52: applications such as tmux use this sequence to copy to the host clipboard.
         term.parser.registerOscHandler(52, (data) => {
             try {
                 const separator = data.indexOf(';');
                 if (separator < 0) return false;
-
                 const encodedText = data.slice(separator + 1);
-                // Clipboard reads over OSC 52 are deliberately ignored; paste remains user-initiated.
                 if (!encodedText || encodedText === '?') return true;
-
                 const text = decodeB64(encodedText);
                 writeClipboardText(text).catch((error) => {
                     console.error('Failed to handle OSC 52 clipboard write:', error);
@@ -918,92 +899,29 @@ export async function initTerminalSession(containerId) {
         });
     }
 
-    // Clickable file opening handler
-    const handleTerminalFileClick = async (clickedPath, event) => {
-        if (!clickedPath) return;
-
-        let cleanPath = clickedPath.trim().replace(/^['"`]+|['"`]+$/g, '');
-        if (cleanPath.includes(':')) {
-            const colonIdx = cleanPath.indexOf(':');
-            if (colonIdx > 0) cleanPath = cleanPath.substring(0, colonIdx);
-        }
-
-        const filename = cleanPath.split('/').pop() || cleanPath;
-
-        // Detect if user held Super (Meta / Windows / Command) during click
-        const isSuper = !!(event && (
-            event.metaKey ||
-            (typeof event.getModifierState === 'function' && (
-                event.getModifierState('Meta') ||
-                event.getModifierState('Super') ||
-                event.getModifierState('OS')
-            ))
-        ));
-        const side = isSuper ? 'left' : 'right';
-
-        if (hasTauri) {
-            const invoke = window.__TAURI__.core.invoke;
-            let resolvedPath = cleanPath;
-
-            try {
-                if (!cleanPath.startsWith('/') && !cleanPath.startsWith('~')) {
-                    let cwd = window._mdtermCwd || '';
-                    if (!cwd) {
-                        cwd = await invoke('pty_get_cwd').catch(() => '');
-                    }
-                    if (cwd) {
-                        resolvedPath = cwd.replace(/\/+$/, '') + '/' + cleanPath;
-                    }
-                } else if (cleanPath.startsWith('~/')) {
-                    const home = await invoke('get_home_dir').catch(() => '');
-                    if (home) {
-                        resolvedPath = home + cleanPath.slice(1);
-                    }
-                }
-
-                // Try reading file locally
-                const content = await invoke('read_file', { path: resolvedPath });
-                showToast("Opened '" + filename + "' (" + side + ")");
-                window.dispatchEvent(new CustomEvent('mdterm-open-file', {
-                    detail: { name: filename, path: resolvedPath, content, side }
-                }));
-                return;
-            } catch (e) {
-                // Not found locally or error reading local file.
-                // This happens when the user is on a remote SSH server or inside a remote tmux session!
-            }
-
-            // Fallback for remote SSH / tmux: invoke mdterm in terminal
-            showToast("Opening '" + filename + "' (" + side + ")...");
-            const flag = isSuper ? '--left ' : '';
-            invoke('pty_write', { data: 'mdterm ' + flag + '"' + cleanPath + '"\n' }).catch(() => {});
-        } else {
-            // Browser preview mode
-            showToast("Opened '" + filename + "' (" + side + ")");
-            const isHtml = /\.(html|htm|xhtml)$/i.test(filename);
-            const sampleContent = isHtml
-                ? `<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="utf-8" />\n  <title>${filename}</title>\n</head>\n<body>\n  <h1>${filename}</h1>\n  <p>Opened via terminal click.</p>\n</body>\n</html>`
-                : '# ' + filename + '\n\nOpened via terminal click.';
-            window.dispatchEvent(new CustomEvent('mdterm-open-file', {
-                detail: { name: filename, path: cleanPath, content: sampleContent, side }
-            }));
-        }
+    const sessionObj = {
+        id: sId,
+        term: term,
+        fitAddon: fitAddon,
+        container: container,
+        cwd: '',
+        lastCols: term.cols || 80,
+        lastRows: term.rows || 24,
+        ro: null
     };
 
-    // OSC 7 for shell current working directory reporting
     if (term.parser && typeof term.parser.registerOscHandler === 'function') {
         term.parser.registerOscHandler(7, (data) => {
             try {
                 if (data.startsWith('file://')) {
                     const url = new URL(data);
-                    window._mdtermCwd = decodeURI(url.pathname);
+                    sessionObj.cwd = decodeURI(url.pathname);
                 }
             } catch (e) {}
             return true;
         });
     }
 
-    // Register Link Provider in xterm.js for files (like from `ls` output)
     const fileLinkRegex = /(?:^|[\s"'\(\)\[\]<>{},;:`])((?:(?:\.|\.\.|\~)?\/)?(?:[\w.-]+\/)*[\w.-]+\.(?:md|markdown|mdown|mkd|txt|rst|org|html|htm|xhtml|toml|json|yaml|yml|sh|rs|js|ts|css|py|c|cpp|h|go))(?:[\s"'\(\)\[\]<>{},;:`]|$)/gi;
 
     if (typeof term.registerLinkProvider === 'function') {
@@ -1024,7 +942,7 @@ export async function initTerminalSession(containerId) {
                     const fullMatch = match[0];
                     const rawPath = match[1];
                     const leadingOffset = fullMatch.indexOf(rawPath);
-                    const startX = match.index + leadingOffset + 1; // 1-based x
+                    const startX = match.index + leadingOffset + 1;
                     const endX = startX + rawPath.length - 1;
 
                     links.push({
@@ -1034,7 +952,64 @@ export async function initTerminalSession(containerId) {
                         },
                         text: rawPath,
                         activate: async (event, clickedText) => {
-                            await handleTerminalFileClick(clickedText, event);
+                            let cleanPath = clickedText.trim().replace(/^['"`]+|['"`]+$/g, '');
+                            if (cleanPath.includes(':')) {
+                                const colonIdx = cleanPath.indexOf(':');
+                                if (colonIdx > 0) cleanPath = cleanPath.substring(0, colonIdx);
+                            }
+
+                            const filename = cleanPath.split('/').pop() || cleanPath;
+                            const isSuper = !!(event && (
+                                event.metaKey ||
+                                (typeof event.getModifierState === 'function' && (
+                                    event.getModifierState('Meta') ||
+                                    event.getModifierState('Super') ||
+                                    event.getModifierState('OS')
+                                ))
+                            ));
+                            const side = isSuper ? 'left' : 'right';
+
+                            if (hasTauri) {
+                                const invoke = window.__TAURI__.core.invoke;
+                                let resolvedPath = cleanPath;
+
+                                try {
+                                    if (!cleanPath.startsWith('/') && !cleanPath.startsWith('~')) {
+                                        let cwd = sessionObj.cwd || '';
+                                        if (!cwd) {
+                                            cwd = await invoke('pty_get_cwd', { sessionId: sId }).catch(() => '');
+                                        }
+                                        if (cwd) {
+                                            resolvedPath = cwd.replace(/\/+$/, '') + '/' + cleanPath;
+                                        }
+                                    } else if (cleanPath.startsWith('~/')) {
+                                        const home = await invoke('get_home_dir').catch(() => '');
+                                        if (home) {
+                                            resolvedPath = home + cleanPath.slice(1);
+                                        }
+                                    }
+
+                                    const content = await invoke('read_file', { path: resolvedPath });
+                                    showToast("Opened '" + filename + "' (" + side + ")");
+                                    window.dispatchEvent(new CustomEvent('mdterm-open-file', {
+                                        detail: { name: filename, path: resolvedPath, content, side, session_id: sId }
+                                    }));
+                                    return;
+                                } catch (e) {}
+
+                                showToast("Opening '" + filename + "' (" + side + ")...");
+                                const flag = isSuper ? '--left ' : '';
+                                invoke('pty_write', { sessionId: sId, data: 'mdterm ' + flag + '"' + cleanPath + '"\n' }).catch(() => {});
+                            } else {
+                                showToast("Opened '" + filename + "' (" + side + ")");
+                                const isHtml = /\.(html|htm|xhtml)$/i.test(filename);
+                                const sampleContent = isHtml
+                                    ? `<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="utf-8" />\n  <title>${filename}</title>\n</head>\n<body>\n  <h1>${filename}</h1>\n  <p>Opened via terminal click.</p>\n</body>\n</html>`
+                                    : '# ' + filename + '\n\nOpened via terminal click.';
+                                window.dispatchEvent(new CustomEvent('mdterm-open-file', {
+                                    detail: { name: filename, path: cleanPath, content: sampleContent, side, session_id: sId }
+                                }));
+                            }
                         }
                     });
 
@@ -1055,10 +1030,10 @@ export async function initTerminalSession(containerId) {
         }
         const initialCols = term.cols && term.cols > 2 ? term.cols : 80;
         const initialRows = term.rows && term.rows > 1 ? term.rows : 24;
-        window._mdtermLastCols = initialCols;
-        window._mdtermLastRows = initialRows;
+        sessionObj.lastCols = initialCols;
+        sessionObj.lastRows = initialRows;
 
-        invoke('pty_spawn', { cols: initialCols, rows: initialRows }).catch(err => {
+        invoke('pty_spawn', { sessionId: sId, cols: initialCols, rows: initialRows }).catch(err => {
             term.write('\r\n\x1b[31mFailed to spawn shell: ' + err + '\x1b[0m\r\n');
         });
 
@@ -1068,54 +1043,39 @@ export async function initTerminalSession(containerId) {
                 fitAddon.fit();
                 const cols = term.cols;
                 const rows = term.rows;
-                if (cols > 2 && rows > 1 && (cols !== window._mdtermLastCols || rows !== window._mdtermLastRows)) {
-                    window._mdtermLastCols = cols;
-                    window._mdtermLastRows = rows;
-                    invoke('pty_resize', { cols, rows }).catch(() => {});
+                if (cols > 2 && rows > 1 && (cols !== sessionObj.lastCols || rows !== sessionObj.lastRows)) {
+                    sessionObj.lastCols = cols;
+                    sessionObj.lastRows = rows;
+                    invoke('pty_resize', { sessionId: sId, cols, rows }).catch(() => {});
                 }
             } catch (e) {}
         };
-        window._mdtermSyncResize = syncPtyResize;
 
         if (window._mdtermTerminalConfig) {
             applyTerminalConfig(window._mdtermTerminalConfig);
             syncPtyResize();
-        } else {
-            invoke('get_terminal_config').then(loadedCfg => {
-                if (loadedCfg) {
-                    applyTerminalConfig(loadedCfg);
-                    syncPtyResize();
-                }
-            }).catch(err => {
-                console.error('Failed to get terminal config:', err);
-            });
         }
 
         if (event && typeof event.listen === 'function') {
-            event.listen('pty-output', (e) => {
+            event.listen('pty-output-' + sId, (e) => {
                 term.write(e.payload);
             });
-            event.listen('terminal-config-changed', (e) => {
-                if (e.payload) {
-                    applyTerminalConfig(e.payload);
-                    syncPtyResize();
-                    window.dispatchEvent(new CustomEvent('mdterm-config-changed', { detail: e.payload }));
-                }
+            event.listen('pty-exit-' + sId, () => {
+                window.dispatchEvent(new CustomEvent('mdterm-pty-exit', { detail: { session_id: sId } }));
             });
         }
 
         term.onData(data => {
-            invoke('pty_write', { data }).catch(() => {});
+            invoke('pty_write', { sessionId: sId, data }).catch(() => {});
         });
 
         const ro = new ResizeObserver(() => {
             syncPtyResize();
         });
         ro.observe(container);
-        window.addEventListener('resize', syncPtyResize);
+        sessionObj.ro = ro;
     } else {
-        term.write('\x1b[1;36m=== mdterm Terminal Emulator ===\x1b[0m\r\n');
-        term.write('\x1b[90mRunning in browser preview. In Tauri desktop app, a native shell runs here.\x1b[0m\r\n\r\n$ ');
+        term.write('\x1b[1;36m=== mdterm Terminal [' + sId + '] ===\x1b[0m\r\n$ ');
         let buf = '';
         term.onData(data => {
             if (data === '\r') {
@@ -1129,9 +1089,11 @@ export async function initTerminalSession(containerId) {
                         ? `<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="utf-8" />\n  <title>${fname}</title>\n</head>\n<body>\n  <h1>${fname}</h1>\n  <p>Opened via terminal in mdterm editor.</p>\n</body>\n</html>`
                         : '# ' + fname + '\n\nOpened via terminal in mdterm editor.';
                     window.dispatchEvent(new CustomEvent('mdterm-open-file', {
-                        detail: { name: fname, path: fname, content: sampleContent }
+                        detail: { name: fname, path: fname, content: sampleContent, session_id: sId }
                     }));
                     term.write('\x1b[32m✓ Opened \'' + fname + '\' in mdterm editor\x1b[0m\r\n');
+                } else if (buf.trim() === 'exit') {
+                    window.dispatchEvent(new CustomEvent('mdterm-pty-exit', { detail: { session_id: sId } }));
                 } else if (buf.trim().length > 0) {
                     term.write('Command in demo mode: ' + buf + '\r\n');
                 }
@@ -1154,26 +1116,59 @@ export async function initTerminalSession(containerId) {
             }
         });
         ro.observe(container);
+        sessionObj.ro = ro;
     }
 
+    window._mdtermSessions[sId] = sessionObj;
     window._mdtermTerminal = term;
     window._mdtermFitAddon = fitAddon;
-    if (window._mdtermTerminalConfig) {
-        applyTerminalConfig(window._mdtermTerminalConfig);
-    } else if (window._mdtermCurrentTheme) {
-        setTerminalTheme(window._mdtermCurrentTheme);
+}
+
+export function closeTerminalSession(sessionId) {
+    const sId = sessionId || window._mdtermActiveSessionId;
+    if (!sId) return;
+    if (window._mdtermSessions && window._mdtermSessions[sId]) {
+        const sess = window._mdtermSessions[sId];
+        try {
+            if (sess.ro) sess.ro.disconnect();
+            if (sess.term) sess.term.dispose();
+        } catch (e) {}
+        delete window._mdtermSessions[sId];
+    }
+    if (window.__TAURI__) {
+        const invoke = (window.__TAURI__.core && window.__TAURI__.core.invoke) || (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke);
+        if (invoke) {
+            invoke('pty_close', { sessionId: sId }).catch(() => {});
+        }
     }
 }
 
-export function clearTerminalSession() {
-    if (window._mdtermTerminal) {
-        window._mdtermTerminal.clear();
+export function clearTerminalSession(sessionId) {
+    const sId = sessionId || window._mdtermActiveSessionId;
+    const sess = (sId && window._mdtermSessions && window._mdtermSessions[sId]) ? window._mdtermSessions[sId] : null;
+    const term = sess ? sess.term : window._mdtermTerminal;
+    if (term) {
+        term.clear();
     }
 }
 
-export function fitTerminalSession() {
+export function fitTerminalSession(sessionId) {
     const doFit = () => {
-        if (window._mdtermFitAddon) {
+        const sId = sessionId || window._mdtermActiveSessionId;
+        if (sId && window._mdtermSessions && window._mdtermSessions[sId]) {
+            const sess = window._mdtermSessions[sId];
+            if (sess.fitAddon) {
+                try {
+                    sess.fitAddon.fit();
+                    if (sess.term && window.__TAURI__) {
+                        const invoke = (window.__TAURI__.core && window.__TAURI__.core.invoke) || (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke);
+                        if (invoke) {
+                            invoke('pty_resize', { sessionId: sId, cols: sess.term.cols, rows: sess.term.rows }).catch(() => {});
+                        }
+                    }
+                } catch (e) {}
+            }
+        } else if (window._mdtermFitAddon) {
             try {
                 window._mdtermFitAddon.fit();
                 if (window._mdtermTerminal && window.__TAURI__) {
@@ -1190,16 +1185,23 @@ export function fitTerminalSession() {
     setTimeout(doFit, 150);
 }
 
-export function focusTerminalSession() {
-    if (window._mdtermTerminal) {
+export function focusTerminalSession(sessionId) {
+    const sId = sessionId || window._mdtermActiveSessionId;
+    if (sId) window._mdtermActiveSessionId = sId;
+    const sess = (sId && window._mdtermSessions && window._mdtermSessions[sId]) ? window._mdtermSessions[sId] : null;
+    const term = sess ? sess.term : window._mdtermTerminal;
+    if (term) {
         try {
             if (typeof window !== 'undefined' && typeof window.focus === 'function') {
                 window.focus();
             }
-            window._mdtermTerminal.focus();
-            const textarea = document.querySelector('.terminal-container .xterm-helper-textarea');
-            if (textarea && document.activeElement !== textarea) {
-                textarea.focus({ preventScroll: true });
+            term.focus();
+            const container = sess ? sess.container : document.querySelector('.terminal-container');
+            if (container) {
+                const textarea = container.querySelector('.xterm-helper-textarea');
+                if (textarea && document.activeElement !== textarea) {
+                    textarea.focus({ preventScroll: true });
+                }
             }
         } catch (e) {}
     }
@@ -1226,7 +1228,7 @@ extern "C" {
     pub fn window_find(query: &str, case_sensitive: bool, backward: bool) -> bool;
 
     #[wasm_bindgen(js_name = initTerminalSession)]
-    async fn init_terminal_session_js(container_id: &str) -> wasm_bindgen::JsValue;
+    async fn init_terminal_session_js(container_id: &str, session_id: &str) -> wasm_bindgen::JsValue;
 
     #[wasm_bindgen(js_name = setTerminalTheme)]
     pub fn set_terminal_theme(theme_name: &str);
@@ -1238,13 +1240,16 @@ extern "C" {
     pub fn render_mermaid_diagrams();
 
     #[wasm_bindgen(js_name = clearTerminalSession)]
-    pub fn clear_terminal_session();
+    pub fn clear_terminal_session_js(session_id: Option<&str>);
 
     #[wasm_bindgen(js_name = fitTerminalSession)]
-    pub fn fit_terminal_session();
+    pub fn fit_terminal_session_js(session_id: Option<&str>);
 
     #[wasm_bindgen(js_name = focusTerminalSession)]
-    pub fn focus_terminal_session();
+    pub fn focus_terminal_session_js(session_id: Option<&str>);
+
+    #[wasm_bindgen(js_name = closeTerminalSession)]
+    pub fn close_terminal_session_js(session_id: &str);
 
     #[wasm_bindgen(js_name = showToast)]
     pub fn show_toast(message: &str);
@@ -1310,7 +1315,6 @@ pub fn window_close() {
     });
 }
 
-
 pub fn window_start_dragging() {
     leptos::task::spawn_local(async {
         window_start_dragging_js().await;
@@ -1334,7 +1338,6 @@ pub async fn send_remote_save(path: &str, content: &str) -> Result<(), String> {
 pub async fn close_remote_session() {
     let _ = closeRemoteSession().await;
 }
-
 
 pub async fn set_window_theme(theme: &str) -> Result<(), String> {
     if !is_tauri_env() {
@@ -1374,8 +1377,25 @@ pub fn apply_terminal_config(config: &TerminalConfig) {
     }
 }
 
-pub async fn init_terminal_session(container_id: &str) {
-    let _ = init_terminal_session_js(container_id).await;
+pub async fn init_terminal_session(container_id: &str, session_id: &str) {
+    let _ = init_terminal_session_js(container_id, session_id).await;
+}
+
+pub fn close_terminal_session(session_id: &str) {
+    close_terminal_session_js(session_id);
+}
+
+#[allow(dead_code)]
+pub fn clear_terminal_session(session_id: Option<&str>) {
+    clear_terminal_session_js(session_id);
+}
+
+pub fn fit_terminal_session(session_id: Option<&str>) {
+    fit_terminal_session_js(session_id);
+}
+
+pub fn focus_terminal_session(session_id: Option<&str>) {
+    focus_terminal_session_js(session_id);
 }
 
 pub async fn get_terminal_config() -> Result<TerminalConfig, String> {

@@ -94,7 +94,7 @@ pub fn EditorHeader(
                             EditorPosition::Left => EditorPosition::Right,
                             EditorPosition::Right => EditorPosition::Left,
                         });
-                        crate::tauri_bridge::fit_terminal_session();
+                        crate::tauri_bridge::fit_terminal_session(None);
                     }
                 >
                     <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

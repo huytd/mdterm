@@ -139,6 +139,41 @@ pub enum SidebarTab {
     Stats,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct WorkspaceTab {
+    pub id: leptos::prelude::RwSignal<String>,
+    pub session_id: leptos::prelude::RwSignal<String>,
+    pub title: leptos::prelude::RwSignal<String>,
+    pub is_editor_open: leptos::prelude::RwSignal<bool>,
+    pub editor_position: leptos::prelude::RwSignal<EditorPosition>,
+    pub active_mode: leptos::prelude::RwSignal<EditorMode>,
+    pub active_filename: leptos::prelude::RwSignal<String>,
+    pub active_path: leptos::prelude::RwSignal<Option<String>>,
+    pub active_content: leptos::prelude::RwSignal<String>,
+    pub is_dirty: leptos::prelude::RwSignal<bool>,
+    pub is_remote_doc: leptos::prelude::RwSignal<bool>,
+    pub split_ratio: leptos::prelude::RwSignal<f64>,
+}
+
+impl WorkspaceTab {
+    pub fn new(id: String, session_id: String, title: String, initial_content: Option<String>) -> Self {
+        Self {
+            id: leptos::prelude::RwSignal::new(id),
+            session_id: leptos::prelude::RwSignal::new(session_id),
+            title: leptos::prelude::RwSignal::new(title),
+            is_editor_open: leptos::prelude::RwSignal::new(false),
+            editor_position: leptos::prelude::RwSignal::new(EditorPosition::Right),
+            active_mode: leptos::prelude::RwSignal::new(EditorMode::Wysiwyg),
+            active_filename: leptos::prelude::RwSignal::new("Untitled.md".to_string()),
+            active_path: leptos::prelude::RwSignal::new(None),
+            active_content: leptos::prelude::RwSignal::new(initial_content.unwrap_or_else(|| "# Untitled Document\n\nStart typing here...".to_string())),
+            is_dirty: leptos::prelude::RwSignal::new(false),
+            is_remote_doc: leptos::prelude::RwSignal::new(false),
+            split_ratio: leptos::prelude::RwSignal::new(50.0),
+        }
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DocumentTab {

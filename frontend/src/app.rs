@@ -9,10 +9,12 @@ use crate::components::{
 };
 use crate::html::{self, HtmlEnvelope};
 use crate::markdown::{html_to_markdown, markdown_to_html};
-use crate::state::{ActiveModal, EditorMode, EditorPosition, FindReplaceState, SlashMenuState, Theme};
+use crate::state::{
+    ActiveModal, EditorMode, EditorPosition, FindReplaceState, SlashMenuState, Theme, WorkspaceTab,
+};
 use crate::tauri_bridge::{
-    self, exec_editor_cmd, fit_terminal_session, focus_terminal_session, set_terminal_theme,
-    window_find,
+    self, close_terminal_session, exec_editor_cmd, fit_terminal_session, focus_terminal_session,
+    set_terminal_theme, window_find,
 };
 
 const THEME_STORAGE_KEY: &str = "mdterm_theme";
@@ -35,17 +37,112 @@ fn persist_theme(theme: Theme) {
 
 #[component]
 pub fn App() -> impl IntoView {
-    // 1. Core State
-    let is_editor_open = RwSignal::new(false);
-    let editor_position = RwSignal::new(EditorPosition::Right);
-    let active_mode = RwSignal::new(EditorMode::Wysiwyg);
-    let active_filename = RwSignal::new(String::from("Untitled.md"));
-    let active_path = RwSignal::new(None::<String>);
-    let active_content = RwSignal::new(WELCOME_MD.to_string());
-    let is_dirty = RwSignal::new(false);
-    let is_remote_doc = RwSignal::new(false);
+    // 1. Multi-Tab State
+    let initial_tab = WorkspaceTab::new(
+        "1".to_string(),
+        "1".to_string(),
+        "Terminal 1".to_string(),
+        Some(WELCOME_MD.to_string()),
+    );
+    let tabs = RwSignal::new(vec![initial_tab]);
+    let active_tab_id = RwSignal::new("1".to_string());
+    let previous_tab_id = RwSignal::new(None::<String>);
+    let next_tab_counter = RwSignal::new(2usize);
+
     let current_theme = RwSignal::new(load_persisted_theme());
     let is_maximized = RwSignal::new(false);
+    let is_dragging = RwSignal::new(false);
+
+    // Modals and menus
+    let active_modal = RwSignal::new(ActiveModal::None);
+    let find_replace = RwSignal::new(FindReplaceState::default());
+    let slash_menu = RwSignal::new(SlashMenuState::default());
+
+    // Helper: get current active WorkspaceTab
+    let get_active_tab = move || {
+        let cur_id = active_tab_id.get();
+        tabs.get().into_iter().find(|t| t.id.get() == cur_id)
+    };
+
+    // Tab switching callback
+    let select_tab_by_id = Callback::new(move |target_id: String| {
+        let cur = active_tab_id.get();
+        if cur != target_id {
+            previous_tab_id.set(Some(cur));
+            active_tab_id.set(target_id.clone());
+            let tid = target_id.clone();
+            leptos::task::spawn_local(async move {
+                focus_terminal_session(Some(&tid));
+                fit_terminal_session(Some(&tid));
+            });
+        }
+    });
+
+    // Tab creation callback
+    let create_new_tab = Callback::new(move |_| {
+        let counter = next_tab_counter.get();
+        next_tab_counter.set(counter + 1);
+        let new_id = format!("{}", counter);
+        let new_tab = WorkspaceTab::new(
+            new_id.clone(),
+            new_id.clone(),
+            format!("Terminal {}", counter),
+            None,
+        );
+        let cur = active_tab_id.get();
+        previous_tab_id.set(Some(cur));
+        tabs.update(|list| list.push(new_tab));
+        active_tab_id.set(new_id.clone());
+        leptos::task::spawn_local(async move {
+            focus_terminal_session(Some(&new_id));
+            fit_terminal_session(Some(&new_id));
+        });
+    });
+
+    // Tab closing callback
+    let close_tab_by_id = Callback::new(move |target_id: String| {
+        let list = tabs.get();
+        if list.len() <= 1 {
+            return;
+        }
+        let cur = active_tab_id.get();
+        let idx_opt = list.iter().position(|t| t.id.get() == target_id);
+        if let Some(idx) = idx_opt {
+            let session_to_close = target_id.clone();
+            close_terminal_session(&session_to_close);
+
+            let mut new_list = list.clone();
+            new_list.remove(idx);
+            tabs.set(new_list.clone());
+
+            if cur == target_id {
+                let next_target = if let Some(prev) = previous_tab_id.get() {
+                    if new_list.iter().any(|t| t.id.get() == prev) {
+                        prev
+                    } else {
+                        let fallback_idx = if idx < new_list.len() {
+                            idx
+                        } else {
+                            new_list.len().saturating_sub(1)
+                        };
+                        new_list[fallback_idx].id.get()
+                    }
+                } else {
+                    let fallback_idx = if idx < new_list.len() {
+                        idx
+                    } else {
+                        new_list.len().saturating_sub(1)
+                    };
+                    new_list[fallback_idx].id.get()
+                };
+                active_tab_id.set(next_target.clone());
+                leptos::task::spawn_local(async move {
+                    focus_terminal_session(Some(&next_target));
+                    fit_terminal_session(Some(&next_target));
+                });
+            }
+        }
+    });
 
     // Initial check for window maximized state
     leptos::task::spawn_local(async move {
@@ -57,7 +154,7 @@ pub fn App() -> impl IntoView {
     Effect::new(move |_| {
         if let Some(win) = web_sys::window() {
             let cb = wasm_bindgen::closure::Closure::wrap(Box::new(move |_: web_sys::Event| {
-                fit_terminal_session();
+                fit_terminal_session(None);
                 leptos::task::spawn_local(async move {
                     let max = tauri_bridge::window_is_maximized().await;
                     is_maximized.set(max);
@@ -67,10 +164,6 @@ pub fn App() -> impl IntoView {
             let _ = win.add_event_listener_with_callback("resize", cb.as_ref().unchecked_ref());
             cb.forget();
         }
-    });
-
-    let is_html_doc = Memo::new(move |_| {
-        html::is_html_file(&active_filename.get(), &active_content.get())
     });
 
     // Persist and synchronize the terminal and native window chrome with the app theme.
@@ -123,15 +216,6 @@ pub fn App() -> impl IntoView {
         }
     });
 
-    // Split ratio: width percentage of the editor pane (20% - 80%, default 50%)
-    let split_ratio = RwSignal::new(50.0f64);
-    let is_dragging = RwSignal::new(false);
-
-    // Modals and menus
-    let active_modal = RwSignal::new(ActiveModal::None);
-    let find_replace = RwSignal::new(FindReplaceState::default());
-    let slash_menu = RwSignal::new(SlashMenuState::default());
-
     // Listen for file open requests triggered from terminal (OSC 5337 / mdterm CLI / click)
     Effect::new(move |_| {
         if let Some(win) = web_sys::window() {
@@ -157,24 +241,39 @@ pub fn App() -> impl IntoView {
                         .ok()
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false);
+                    let target_session = js_sys::Reflect::get(&detail, &"session_id".into())
+                        .ok()
+                        .and_then(|v| v.as_string());
 
-                    active_filename.set(name);
-                    active_path.set(path.clone());
-                    is_dirty.set(false);
-                    is_remote_doc.set(is_remote);
-                    editor_position.set(if side == "left" { EditorPosition::Left } else { EditorPosition::Right });
-                    is_editor_open.set(true);
-                    fit_terminal_session();
-
-                    if !content.is_empty() {
-                        active_content.set(content);
-                    } else if let Some(p) = path {
-                        let p_clone = p.clone();
-                        leptos::task::spawn_local(async move {
-                            if let Ok(disk_content) = tauri_bridge::read_file(&p_clone).await {
-                                active_content.set(disk_content);
-                            }
+                    let cur_tabs = tabs.get();
+                    let matched_tab = target_session
+                        .and_then(|sid| cur_tabs.iter().find(|t| t.session_id.get() == sid).cloned())
+                        .or_else(|| {
+                            let cur_id = active_tab_id.get();
+                            cur_tabs.iter().find(|t| t.id.get() == cur_id).cloned()
                         });
+
+                    if let Some(tab) = matched_tab {
+                        let sid = tab.session_id.get();
+                        tab.active_filename.set(name);
+                        tab.active_path.set(path.clone());
+                        tab.is_dirty.set(false);
+                        tab.is_remote_doc.set(is_remote);
+                        tab.editor_position.set(if side == "left" { EditorPosition::Left } else { EditorPosition::Right });
+                        tab.is_editor_open.set(true);
+                        fit_terminal_session(Some(&sid));
+
+                        if !content.is_empty() {
+                            tab.active_content.set(content);
+                        } else if let Some(p) = path {
+                            let p_clone = p.clone();
+                            let active_content = tab.active_content;
+                            leptos::task::spawn_local(async move {
+                                if let Ok(disk_content) = tauri_bridge::read_file(&p_clone).await {
+                                    active_content.set(disk_content);
+                                }
+                            });
+                        }
                     }
                 }
             }) as Box<dyn FnMut(web_sys::CustomEvent)>);
@@ -188,16 +287,48 @@ pub fn App() -> impl IntoView {
     Effect::new(move |_| {
         if let Some(win) = web_sys::window() {
             let cb_saved = wasm_bindgen::closure::Closure::wrap(Box::new(move |_: web_sys::CustomEvent| {
-                is_dirty.set(false);
+                if let Some(tab) = get_active_tab() {
+                    tab.is_dirty.set(false);
+                }
             }) as Box<dyn FnMut(web_sys::CustomEvent)>);
             let _ = win.add_event_listener_with_callback("mdterm-file-saved", cb_saved.as_ref().unchecked_ref());
             cb_saved.forget();
 
             let cb_closed = wasm_bindgen::closure::Closure::wrap(Box::new(move |_: web_sys::CustomEvent| {
-                is_remote_doc.set(false);
+                if let Some(tab) = get_active_tab() {
+                    tab.is_remote_doc.set(false);
+                }
             }) as Box<dyn FnMut(web_sys::CustomEvent)>);
             let _ = win.add_event_listener_with_callback("mdterm-remote-closed", cb_closed.as_ref().unchecked_ref());
             cb_closed.forget();
+        }
+    });
+
+    // Listen for shell process exits
+    Effect::new(move |_| {
+        if let Some(win) = web_sys::window() {
+            let cb_exit = wasm_bindgen::closure::Closure::wrap(Box::new(move |ev: web_sys::CustomEvent| {
+                if let Ok(detail) = js_sys::Reflect::get(&ev, &"detail".into()) {
+                    let target_session = js_sys::Reflect::get(&detail, &"session_id".into())
+                        .ok()
+                        .and_then(|v| v.as_string())
+                        .or_else(|| js_sys::Reflect::get(&detail, &"id".into()).ok().and_then(|v| v.as_string()));
+
+                    if let Some(sid) = target_session {
+                        let cur_tabs = tabs.get();
+                        if cur_tabs.len() > 1 {
+                            if let Some(tab) = cur_tabs.iter().find(|t| t.session_id.get() == sid) {
+                                close_tab_by_id.run(tab.id.get());
+                            }
+                        } else {
+                            tauri_bridge::window_close();
+                        }
+                    }
+                }
+            }) as Box<dyn FnMut(web_sys::CustomEvent)>);
+
+            let _ = win.add_event_listener_with_callback("mdterm-pty-exit", cb_exit.as_ref().unchecked_ref());
+            cb_exit.forget();
         }
     });
 
@@ -210,104 +341,120 @@ pub fn App() -> impl IntoView {
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| "document.md".to_string());
                 if let Ok(disk_content) = tauri_bridge::read_file(&file_path).await {
-                    active_filename.set(name);
-                    active_path.set(Some(file_path));
-                    active_content.set(disk_content);
-                    is_dirty.set(false);
-                    is_remote_doc.set(false);
-                    is_editor_open.set(true);
-                    fit_terminal_session();
+                    if let Some(tab) = get_active_tab() {
+                        tab.active_filename.set(name);
+                        tab.active_path.set(Some(file_path));
+                        tab.active_content.set(disk_content);
+                        tab.is_dirty.set(false);
+                        tab.is_remote_doc.set(false);
+                        tab.is_editor_open.set(true);
+                        let sid = tab.session_id.get();
+                        fit_terminal_session(Some(&sid));
+                    }
                 }
             }
         });
     });
 
-    // Handle content updates from editor
-    let handle_content_change = Callback::new(move |new_text: String| {
-        active_content.set(new_text);
-        is_dirty.set(true);
-    });
-
     // Save active document
     let save_active_document = move || {
-        let content = active_content.get();
-        let target_path = active_path.get().unwrap_or_else(|| active_filename.get());
-        let is_remote = is_remote_doc.get();
+        if let Some(tab) = get_active_tab() {
+            let content = tab.active_content.get();
+            let target_path = tab.active_path.get().unwrap_or_else(|| tab.active_filename.get());
+            let is_remote = tab.is_remote_doc.get();
+            let is_dirty = tab.is_dirty;
+            let active_path = tab.active_path;
+            let active_filename = tab.active_filename;
 
-        if is_remote {
-            leptos::task::spawn_local(async move {
-                if let Err(e) = tauri_bridge::send_remote_save(&target_path, &content).await {
-                    tauri_bridge::show_toast(&format!("Remote save error: {}", e));
-                }
-            });
-        } else {
-            leptos::task::spawn_local(async move {
-                match tauri_bridge::write_file(&target_path, &content).await {
-                    Ok(_) => {
-                        is_dirty.set(false);
-                        active_path.set(Some(target_path.clone()));
-                        let name = std::path::Path::new(&target_path)
-                            .file_name()
-                            .map(|s| s.to_string_lossy().to_string())
-                            .unwrap_or(target_path.clone());
-                        active_filename.set(name.clone());
-                        tauri_bridge::show_toast(&format!("Saved '{}'", name));
+            if is_remote {
+                leptos::task::spawn_local(async move {
+                    if let Err(e) = tauri_bridge::send_remote_save(&target_path, &content).await {
+                        tauri_bridge::show_toast(&format!("Remote save error: {}", e));
                     }
-                    Err(e) => {
-                        tauri_bridge::show_toast(&format!("Save failed: {}", e));
+                });
+            } else {
+                leptos::task::spawn_local(async move {
+                    match tauri_bridge::write_file(&target_path, &content).await {
+                        Ok(_) => {
+                            is_dirty.set(false);
+                            active_path.set(Some(target_path.clone()));
+                            let name = std::path::Path::new(&target_path)
+                                .file_name()
+                                .map(|s| s.to_string_lossy().to_string())
+                                .unwrap_or(target_path.clone());
+                            active_filename.set(name.clone());
+                            tauri_bridge::show_toast(&format!("Saved '{}'", name));
+                        }
+                        Err(e) => {
+                            tauri_bridge::show_toast(&format!("Save failed: {}", e));
+                        }
                     }
-                }
-            });
+                });
+            }
         }
     };
 
     // Open existing file
     let open_file_by_path = Callback::new(move |path: String| {
         let path_clone = path.clone();
-        leptos::task::spawn_local(async move {
-            if let Ok(content) = tauri_bridge::read_file(&path_clone).await {
-                let name = std::path::Path::new(&path_clone)
-                    .file_name()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| path_clone.clone());
+        if let Some(tab) = get_active_tab() {
+            let active_content = tab.active_content;
+            let active_filename = tab.active_filename;
+            let active_path = tab.active_path;
+            let is_dirty = tab.is_dirty;
+            let is_remote_doc = tab.is_remote_doc;
+            let is_editor_open = tab.is_editor_open;
+            let sid = tab.session_id.get();
 
-                active_content.set(content);
-                active_filename.set(name);
-                active_path.set(Some(path_clone));
-                is_dirty.set(false);
-                is_remote_doc.set(false);
-                is_editor_open.set(true);
-                fit_terminal_session();
-            }
-        });
+            leptos::task::spawn_local(async move {
+                if let Ok(content) = tauri_bridge::read_file(&path_clone).await {
+                    let name = std::path::Path::new(&path_clone)
+                        .file_name()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_else(|| path_clone.clone());
+
+                    active_content.set(content);
+                    active_filename.set(name);
+                    active_path.set(Some(path_clone));
+                    is_dirty.set(false);
+                    is_remote_doc.set(false);
+                    is_editor_open.set(true);
+                    fit_terminal_session(Some(&sid));
+                }
+            });
+        }
     });
 
     // New Document
     let handle_new_file = Callback::new(move |open_on_left: bool| {
-        active_filename.set("Untitled.md".to_string());
-        active_path.set(None);
-        active_content.set("# Untitled Document\n\nStart typing here...".to_string());
-        is_dirty.set(false);
-        is_remote_doc.set(false);
-        editor_position.set(if open_on_left { EditorPosition::Left } else { EditorPosition::Right });
-        is_editor_open.set(true);
-        fit_terminal_session();
+        if let Some(tab) = get_active_tab() {
+            let sid = tab.session_id.get();
+            tab.active_filename.set("Untitled.md".to_string());
+            tab.active_path.set(None);
+            tab.active_content.set("# Untitled Document\n\nStart typing here...".to_string());
+            tab.is_dirty.set(false);
+            tab.is_remote_doc.set(false);
+            tab.editor_position.set(if open_on_left { EditorPosition::Left } else { EditorPosition::Right });
+            tab.is_editor_open.set(true);
+            fit_terminal_session(Some(&sid));
+        }
     });
 
     // Close Editor (return to full-screen terminal)
     let handle_close_editor = Callback::new(move |_| {
-        if is_remote_doc.get() {
-            leptos::task::spawn_local(async move {
-                tauri_bridge::close_remote_session().await;
-            });
-            is_remote_doc.set(false);
+        if let Some(tab) = get_active_tab() {
+            let sid = tab.session_id.get();
+            if tab.is_remote_doc.get() {
+                leptos::task::spawn_local(async move {
+                    tauri_bridge::close_remote_session().await;
+                });
+                tab.is_remote_doc.set(false);
+            }
+            tab.is_editor_open.set(false);
+            fit_terminal_session(Some(&sid));
+            focus_terminal_session(Some(&sid));
         }
-        is_editor_open.set(false);
-        fit_terminal_session();
-        focus_terminal_session();
     });
-
-
 
     let handle_insert_table_confirm = Callback::new(move |(rows, cols): (usize, usize)| {
         let mut table_html = String::from("<table class=\"md-table\"><thead><tr>");
@@ -397,26 +544,27 @@ pub fn App() -> impl IntoView {
 
     // Export confirmation
     let handle_export_confirm = Callback::new(move |format_choice: &'static str| {
-        let current_text = active_content.get();
-        let base_name = active_filename.get();
-        let is_html = is_html_doc.get();
-        let clean_name = base_name
-            .strip_suffix(".html")
-            .or_else(|| base_name.strip_suffix(".htm"))
-            .or_else(|| base_name.strip_suffix(".xhtml"))
-            .or_else(|| base_name.strip_suffix(".md"))
-            .or_else(|| base_name.strip_suffix(".markdown"))
-            .unwrap_or(&base_name);
+        if let Some(tab) = get_active_tab() {
+            let current_text = tab.active_content.get();
+            let base_name = tab.active_filename.get();
+            let is_html = html::is_html_file(&base_name, &current_text);
+            let clean_name = base_name
+                .strip_suffix(".html")
+                .or_else(|| base_name.strip_suffix(".htm"))
+                .or_else(|| base_name.strip_suffix(".xhtml"))
+                .or_else(|| base_name.strip_suffix(".md"))
+                .or_else(|| base_name.strip_suffix(".markdown"))
+                .unwrap_or(&base_name);
 
-        match format_choice {
-            "html" => {
-                let standalone_html = if is_html {
-                    let env = HtmlEnvelope::parse(&current_text);
-                    env.ensure_full_document(clean_name)
-                } else {
-                    let body_html = markdown_to_html(&current_text, false);
-                    format!(
-                        r#"<!DOCTYPE html>
+            match format_choice {
+                "html" => {
+                    let standalone_html = if is_html {
+                        let env = HtmlEnvelope::parse(&current_text);
+                        env.ensure_full_document(clean_name)
+                    } else {
+                        let body_html = markdown_to_html(&current_text, false);
+                        format!(
+                            r#"<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -445,21 +593,22 @@ pub fn App() -> impl IntoView {
 {}
 </body>
 </html>"#,
-                        clean_name, body_html
-                    )
-                };
-                tauri_bridge::triggerDownload(&format!("{}.html", clean_name), &standalone_html, "text/html");
-            }
-            "print" => {
-                tauri_bridge::openPrintDialog();
-            }
-            _ => {
-                let md_content = if is_html {
-                    html_to_markdown(&current_text)
-                } else {
-                    current_text
-                };
-                tauri_bridge::triggerDownload(&format!("{}.md", clean_name), &md_content, "text/markdown");
+                            clean_name, body_html
+                        )
+                    };
+                    tauri_bridge::triggerDownload(&format!("{}.html", clean_name), &standalone_html, "text/html");
+                }
+                "print" => {
+                    tauri_bridge::openPrintDialog();
+                }
+                _ => {
+                    let md_content = if is_html {
+                        html_to_markdown(&current_text)
+                    } else {
+                        current_text
+                    };
+                    tauri_bridge::triggerDownload(&format!("{}.md", clean_name), &md_content, "text/markdown");
+                }
             }
         }
     });
@@ -484,12 +633,14 @@ pub fn App() -> impl IntoView {
         let replace = find_replace.get().replace_query;
         if query.is_empty() { return; }
 
-        let current_text = active_content.get();
-        if let Some(pos) = current_text.find(&query) {
-            let mut new_text = current_text.clone();
-            new_text.replace_range(pos..pos + query.len(), &replace);
-            active_content.set(new_text.clone());
-            handle_content_change.run(new_text);
+        if let Some(tab) = get_active_tab() {
+            let current_text = tab.active_content.get();
+            if let Some(pos) = current_text.find(&query) {
+                let mut new_text = current_text.clone();
+                new_text.replace_range(pos..pos + query.len(), &replace);
+                tab.active_content.set(new_text);
+                tab.is_dirty.set(true);
+            }
         }
     });
 
@@ -498,37 +649,93 @@ pub fn App() -> impl IntoView {
         let replace = find_replace.get().replace_query;
         if query.is_empty() { return; }
 
-        let current_text = active_content.get();
-        let new_text = current_text.replace(&query, &replace);
-        active_content.set(new_text.clone());
-        handle_content_change.run(new_text);
+        if let Some(tab) = get_active_tab() {
+            let current_text = tab.active_content.get();
+            let new_text = current_text.replace(&query, &replace);
+            tab.active_content.set(new_text);
+            tab.is_dirty.set(true);
+        }
     });
 
     // Global keyboard shortcut listener
     let on_window_keydown = move |ev: KeyboardEvent| {
-        let is_ctrl = ev.ctrl_key() || ev.meta_key();
+        let is_meta = ev.meta_key()
+            || ev.get_modifier_state("Meta")
+            || ev.get_modifier_state("Super")
+            || ev.get_modifier_state("OS");
+        let is_ctrl = ev.ctrl_key() || is_meta;
         let is_alt = ev.alt_key();
         let key = ev.key().to_lowercase();
 
-        if is_alt {
-            match key.as_str() {
-                "1" => {
-                    ev.prevent_default();
-                    active_mode.set(EditorMode::Wysiwyg);
+        // 1. Theme cycling: Super + Alt + T or Ctrl + Alt + T
+        if is_ctrl && is_alt && key == "t" {
+            ev.prevent_default();
+            current_theme.update(|t| *t = t.next());
+            return;
+        }
+
+        // 2. Tab switching & Creation: Super + T or Ctrl + T (when not Alt)
+        if is_ctrl && !is_alt && key == "t" {
+            ev.prevent_default();
+            let list = tabs.get();
+            if list.len() <= 1 {
+                create_new_tab.run(());
+            } else if let Some(prev) = previous_tab_id.get() {
+                let cur = active_tab_id.get();
+                if prev != cur && list.iter().any(|t| t.id.get() == prev) {
+                    select_tab_by_id.run(prev);
+                } else {
+                    let cur_idx = list.iter().position(|t| t.id.get() == cur).unwrap_or(0);
+                    let next_idx = (cur_idx + 1) % list.len();
+                    select_tab_by_id.run(list[next_idx].id.get());
                 }
-                "2" => {
+            } else {
+                let cur = active_tab_id.get();
+                let cur_idx = list.iter().position(|t| t.id.get() == cur).unwrap_or(0);
+                let next_idx = (cur_idx + 1) % list.len();
+                select_tab_by_id.run(list[next_idx].id.get());
+            }
+            return;
+        }
+
+        // 3. Tab switching by number: Super + 1..9 or Ctrl + 1..9 (when not Alt)
+        if is_ctrl && !is_alt {
+            if let Ok(num) = key.parse::<usize>() {
+                if num >= 1 && num <= 9 {
                     ev.prevent_default();
-                    active_mode.set(EditorMode::Split);
+                    let list = tabs.get();
+                    let idx = num - 1;
+                    if idx < list.len() {
+                        select_tab_by_id.run(list[idx].id.get());
+                    }
+                    return;
                 }
-                "3" => {
-                    ev.prevent_default();
-                    active_mode.set(EditorMode::Source);
-                }
-                _ => {}
             }
         }
 
-        if is_ctrl {
+        // 4. Editor Mode switching: Alt + 1..3 (when not Ctrl/Super)
+        if is_alt && !is_ctrl {
+            if let Some(active_tab) = get_active_tab() {
+                match key.as_str() {
+                    "1" => {
+                        ev.prevent_default();
+                        active_tab.active_mode.set(EditorMode::Wysiwyg);
+                    }
+                    "2" => {
+                        ev.prevent_default();
+                        active_tab.active_mode.set(EditorMode::Split);
+                    }
+                    "3" => {
+                        ev.prevent_default();
+                        active_tab.active_mode.set(EditorMode::Source);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // 5. Document & window shortcuts: Super/Ctrl + key
+        if is_ctrl && !is_alt {
             match key.as_str() {
                 "s" => {
                     ev.prevent_default();
@@ -536,10 +743,12 @@ pub fn App() -> impl IntoView {
                 }
                 "o" => {
                     ev.prevent_default();
-                    if ev.meta_key() {
-                        editor_position.set(EditorPosition::Left);
-                    } else {
-                        editor_position.set(EditorPosition::Right);
+                    if let Some(active_tab) = get_active_tab() {
+                        if ev.meta_key() {
+                            active_tab.editor_position.set(EditorPosition::Left);
+                        } else {
+                            active_tab.editor_position.set(EditorPosition::Right);
+                        }
                     }
                     active_modal.set(ActiveModal::OpenFile);
                 }
@@ -552,22 +761,24 @@ pub fn App() -> impl IntoView {
                     find_replace.update(|s| s.is_open = !s.is_open);
                 }
                 "w" => {
-                    if is_editor_open.get() {
-                        ev.prevent_default();
-                        handle_close_editor.run(());
-                    }
-                }
-                "t" => {
                     ev.prevent_default();
-                    current_theme.update(|t| *t = t.next());
+                    if let Some(active_tab) = get_active_tab() {
+                        if active_tab.is_editor_open.get() {
+                            handle_close_editor.run(());
+                        } else if tabs.get().len() > 1 {
+                            close_tab_by_id.run(active_tab.id.get());
+                        }
+                    }
                 }
                 "m" => {
                     ev.prevent_default();
-                    active_mode.update(|m| *m = match *m {
-                        EditorMode::Wysiwyg => EditorMode::Split,
-                        EditorMode::Split => EditorMode::Source,
-                        EditorMode::Source => EditorMode::Wysiwyg,
-                    });
+                    if let Some(active_tab) = get_active_tab() {
+                        active_tab.active_mode.update(|m| *m = match *m {
+                            EditorMode::Wysiwyg => EditorMode::Split,
+                            EditorMode::Split => EditorMode::Source,
+                            EditorMode::Source => EditorMode::Wysiwyg,
+                        });
+                    }
                 }
                 _ => {}
             }
@@ -581,13 +792,17 @@ pub fn App() -> impl IntoView {
                 let inner_width = win.inner_width().ok().and_then(|w| w.as_f64()).unwrap_or(1200.0);
                 let client_x = ev.client_x() as f64;
                 let pct = (client_x / inner_width) * 100.0;
-                let new_split = if editor_position.get() == EditorPosition::Left {
-                    pct.clamp(20.0, 80.0)
-                } else {
-                    (100.0 - pct).clamp(20.0, 80.0)
-                };
-                split_ratio.set(new_split);
-                fit_terminal_session();
+                if let Some(active_tab) = get_active_tab() {
+                    let pos = active_tab.editor_position.get();
+                    let new_split = if pos == EditorPosition::Left {
+                        pct.clamp(20.0, 80.0)
+                    } else {
+                        (100.0 - pct).clamp(20.0, 80.0)
+                    };
+                    active_tab.split_ratio.set(new_split);
+                    let sid = active_tab.session_id.get();
+                    fit_terminal_session(Some(&sid));
+                }
             }
         }
     };
@@ -595,7 +810,10 @@ pub fn App() -> impl IntoView {
     let on_mouse_up = move |_| {
         if is_dragging.get() {
             is_dragging.set(false);
-            fit_terminal_session();
+            if let Some(active_tab) = get_active_tab() {
+                let sid = active_tab.session_id.get();
+                fit_terminal_session(Some(&sid));
+            }
         }
     };
 
@@ -614,116 +832,173 @@ pub fn App() -> impl IntoView {
             tabindex="-1"
         >
             <TitleBar
-                active_filename=active_filename.into()
-                is_dirty=is_dirty.into()
-                is_editor_open=is_editor_open.into()
+                tabs=tabs.into()
+                active_tab_id=active_tab_id.into()
+                on_select_tab=select_tab_by_id
+                on_new_tab=create_new_tab
+                on_close_tab=close_tab_by_id
                 is_maximized=is_maximized
-                current_theme=current_theme
             />
 
-            <div class=move || {
-                if editor_position.get() == EditorPosition::Left {
-                    "app-workspace pos-editor-left"
-                } else {
-                    "app-workspace pos-editor-right"
-                }
-            }>
-                {move || if is_editor_open.get() {
-                    view! {
-                        <div
-                            class="workspace-pane editor-pane"
-                            style=move || format!("width: {}%;", split_ratio.get())
-                        >
-                            <EditorHeader
-                                active_filename=active_filename.into()
-                                is_dirty=is_dirty.into()
-                                is_remote=is_remote_doc.into()
-                                is_html=is_html_doc.into()
-                                active_mode=active_mode
-                                current_theme=current_theme
-                                editor_position=editor_position
-                                on_close_editor=handle_close_editor
-                                on_save_file=Callback::new(move |_| save_active_document())
-                                on_export=Callback::new(move |_| active_modal.set(ActiveModal::Export))
-                            />
+            <div class="tabs-workspace-container">
+                {move || {
+                    let current_active = active_tab_id.get();
+                    tabs.get().into_iter().map(|tab| {
+                        let tid = tab.id.get();
+                        let is_active = tid == current_active;
+                        let sid = tab.session_id.get();
+                        let active_filename = tab.active_filename;
+                        let is_dirty = tab.is_dirty;
+                        let is_remote_doc = tab.is_remote_doc;
+                        let is_editor_open = tab.is_editor_open;
+                        let editor_position = tab.editor_position;
+                        let active_mode = tab.active_mode;
+                        let active_content = tab.active_content;
+                        let split_ratio = tab.split_ratio;
 
-                            {move || match active_mode.get() {
-                                EditorMode::Wysiwyg => {
-                                    if is_html_doc.get() {
+                        let is_html_doc = Memo::new(move |_| {
+                            html::is_html_file(&active_filename.get(), &active_content.get())
+                        });
+
+                        let handle_content_change_for_tab = Callback::new(move |new_text: String| {
+                            active_content.set(new_text);
+                            is_dirty.set(true);
+                        });
+
+                        let sid_for_fit = sid.clone();
+                        let sid_for_close = sid.clone();
+
+                        let workspace_pane_class = if is_active {
+                            "tab-workspace-pane tab-workspace-active"
+                        } else {
+                            "tab-workspace-pane tab-workspace-hidden"
+                        };
+
+                        let workspace_class = move || {
+                            if editor_position.get() == EditorPosition::Left {
+                                "app-workspace pos-editor-left"
+                            } else {
+                                "app-workspace pos-editor-right"
+                            }
+                        };
+
+                        view! {
+                            <div class=workspace_pane_class>
+                                <div class=workspace_class>
+                                    {move || if is_editor_open.get() {
+                                        let sid_fit = sid_for_fit.clone();
+                                        let sid_close = sid_for_close.clone();
                                         view! {
-                                            <DocumentPreview
-                                                content=active_content.into()
-                                                is_html=is_html_doc.into()
-                                                on_change=handle_content_change
-                                            />
+                                            <div
+                                                class="workspace-pane editor-pane"
+                                                style=move || format!("width: {}%;", split_ratio.get())
+                                            >
+                                                <EditorHeader
+                                                    active_filename=active_filename.into()
+                                                    is_dirty=is_dirty.into()
+                                                    is_remote=is_remote_doc.into()
+                                                    is_html=is_html_doc.into()
+                                                    active_mode=active_mode
+                                                    current_theme=current_theme
+                                                    editor_position=editor_position
+                                                    on_close_editor=Callback::new(move |_| {
+                                                        if is_remote_doc.get() {
+                                                            leptos::task::spawn_local(async move {
+                                                                tauri_bridge::close_remote_session().await;
+                                                            });
+                                                            is_remote_doc.set(false);
+                                                        }
+                                                        is_editor_open.set(false);
+                                                        let sid_c = sid_close.clone();
+                                                        fit_terminal_session(Some(&sid_c));
+                                                        focus_terminal_session(Some(&sid_c));
+                                                    })
+                                                    on_save_file=Callback::new(move |_| save_active_document())
+                                                    on_export=Callback::new(move |_| active_modal.set(ActiveModal::Export))
+                                                />
+
+                                                {move || match active_mode.get() {
+                                                    EditorMode::Wysiwyg => {
+                                                        if is_html_doc.get() {
+                                                            view! {
+                                                                <DocumentPreview
+                                                                    content=active_content.into()
+                                                                    is_html=is_html_doc.into()
+                                                                    on_change=handle_content_change_for_tab
+                                                                />
+                                                            }.into_any()
+                                                        } else {
+                                                            view! {
+                                                                <WysiwygEditor
+                                                                    content=active_content
+                                                                    is_html=is_html_doc.into()
+                                                                    on_change=handle_content_change_for_tab
+                                                                    slash_menu=slash_menu
+                                                                />
+                                                            }.into_any()
+                                                        }
+                                                    },
+                                                    EditorMode::Split => view! {
+                                                        <SplitEditor
+                                                            content=active_content
+                                                            is_html=is_html_doc.into()
+                                                            on_change=handle_content_change_for_tab
+                                                        />
+                                                    }.into_any(),
+                                                    EditorMode::Source => view! {
+                                                        <SourceEditor
+                                                            content=active_content
+                                                            is_html=is_html_doc.into()
+                                                            on_change=handle_content_change_for_tab
+                                                        />
+                                                    }.into_any(),
+                                                }}
+                                            </div>
+
+                                            <div
+                                                class="workspace-divider"
+                                                title="Drag to resize, double-click to reset (50/50)"
+                                                on:mousedown=move |_| is_dragging.set(true)
+                                                on:dblclick=move |_| {
+                                                    split_ratio.set(50.0);
+                                                    fit_terminal_session(Some(&sid_fit));
+                                                }
+                                            >
+                                                <div class="divider-line"></div>
+                                            </div>
                                         }.into_any()
                                     } else {
                                         view! {
-                                            <WysiwygEditor
-                                                content=active_content
-                                                is_html=is_html_doc.into()
-                                                on_change=handle_content_change
-                                                slash_menu=slash_menu
+                                            <FloatingControls
+                                                current_theme=current_theme
+                                                on_new_file=handle_new_file
+                                                on_open_file=Callback::new(move |open_on_left: bool| {
+                                                    editor_position.set(if open_on_left { EditorPosition::Left } else { EditorPosition::Right });
+                                                    active_modal.set(ActiveModal::OpenFile);
+                                                })
                                             />
                                         }.into_any()
-                                    }
-                                },
-                                EditorMode::Split => view! {
-                                    <SplitEditor
-                                        content=active_content
-                                        is_html=is_html_doc.into()
-                                        on_change=handle_content_change
-                                    />
-                                }.into_any(),
-                                EditorMode::Source => view! {
-                                    <SourceEditor
-                                        content=active_content
-                                        is_html=is_html_doc.into()
-                                        on_change=handle_content_change
-                                    />
-                                }.into_any(),
-                            }}
-                        </div>
+                                    }}
 
-                        <div
-                            class="workspace-divider"
-                            title="Drag to resize, double-click to reset (50/50)"
-                            on:mousedown=move |_| is_dragging.set(true)
-                            on:dblclick=move |_| {
-                                split_ratio.set(50.0);
-                                fit_terminal_session();
-                            }
-                        >
-                            <div class="divider-line"></div>
-                        </div>
-                    }.into_any()
-                } else {
-                    view! {
-                        <FloatingControls
-                            current_theme=current_theme
-                            on_new_file=handle_new_file
-                            on_open_file=Callback::new(move |open_on_left: bool| {
-                                editor_position.set(if open_on_left { EditorPosition::Left } else { EditorPosition::Right });
-                                active_modal.set(ActiveModal::OpenFile);
-                            })
-                        />
-                    }.into_any()
+                                    <div
+                                        class=move || if is_editor_open.get() {
+                                            "workspace-pane terminal-pane-container"
+                                        } else {
+                                            "workspace-pane terminal-pane-container full-width"
+                                        }
+                                        style=move || if is_editor_open.get() {
+                                            format!("width: {}%;", 100.0 - split_ratio.get())
+                                        } else {
+                                            "width: 100%;".to_string()
+                                        }
+                                    >
+                                        <TerminalPane session_id=sid.clone() />
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    }).collect::<Vec<_>>()
                 }}
-
-                <div
-                    class=move || if is_editor_open.get() {
-                        "workspace-pane terminal-pane-container"
-                    } else {
-                        "workspace-pane terminal-pane-container full-width"
-                    }
-                    style=move || if is_editor_open.get() {
-                        format!("width: {}%;", 100.0 - split_ratio.get())
-                    } else {
-                        "width: 100%;".to_string()
-                    }
-                >
-                    <TerminalPane />
-                </div>
             </div>
 
             <Modals
@@ -735,17 +1010,18 @@ pub fn App() -> impl IntoView {
                 on_insert_table_confirm=handle_insert_table_confirm
                 on_export_confirm=handle_export_confirm
                 on_new_file_confirm=Callback::new(move |name: String| {
-                    let is_html = html::is_html_file(&name, "");
-                    active_filename.set(name.clone());
-                    active_path.set(Some(name.clone()));
-                    if is_html {
-                        let clean = name
-                            .strip_suffix(".html")
-                            .or_else(|| name.strip_suffix(".htm"))
-                            .or_else(|| name.strip_suffix(".xhtml"))
-                            .unwrap_or(&name);
-                        active_content.set(format!(
-                            r#"<!DOCTYPE html>
+                    if let Some(tab) = get_active_tab() {
+                        let is_html = html::is_html_file(&name, "");
+                        tab.active_filename.set(name.clone());
+                        tab.active_path.set(Some(name.clone()));
+                        if is_html {
+                            let clean = name
+                                .strip_suffix(".html")
+                                .or_else(|| name.strip_suffix(".htm"))
+                                .or_else(|| name.strip_suffix(".xhtml"))
+                                .unwrap_or(&name);
+                            tab.active_content.set(format!(
+                                r#"<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -757,15 +1033,17 @@ pub fn App() -> impl IntoView {
   <p>Start typing here...</p>
 </body>
 </html>"#,
-                            clean, clean
-                        ));
-                    } else {
-                        active_content.set("# New File\n\n".to_string());
+                                clean, clean
+                            ));
+                        } else {
+                            tab.active_content.set("# New File\n\n".to_string());
+                        }
+                        tab.is_dirty.set(false);
+                        tab.is_remote_doc.set(false);
+                        tab.is_editor_open.set(true);
+                        let sid = tab.session_id.get();
+                        fit_terminal_session(Some(&sid));
                     }
-                    is_dirty.set(false);
-                    is_remote_doc.set(false);
-                    is_editor_open.set(true);
-                    fit_terminal_session();
                 })
                 on_open_file_confirm=open_file_by_path
                 on_find_next=handle_find_next
@@ -778,5 +1056,4 @@ pub fn App() -> impl IntoView {
             <WindowResizeHandles is_maximized=is_maximized.into() />
         </div>
     }
-
 }

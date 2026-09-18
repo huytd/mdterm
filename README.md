@@ -260,17 +260,15 @@ character_height: 1.25
 
 | Shortcut | Action |
 | :--- | :--- |
-| `Ctrl + S` | Save active document |
-| `Ctrl + O` | Open file / show files sidebar |
-| `Ctrl + N` | Create new document tab |
-| `Ctrl + W` | Close active tab |
+| `Super + Alt + T` / `Ctrl + Alt + T` | Cycle Theme (Dark → Light → Nord → Monokai) |
+| `Super + T` / `Ctrl + T` | Switch back & forth between tabs (or create new tab) |
+| `Super + 1..9` / `Ctrl + 1..9` | Switch directly to Tab 1 through 9 |
+| `Super + W` / `Ctrl + W` | Close active editor / close active tab |
+| `Super + S` / `Ctrl + S` | Save active document (local disk or remote SSH) |
+| `Super + O` / `Ctrl + O` | Open file (Hold `Super` to open editor on left) |
+| `Super + N` / `Ctrl + N` | Create new document (Hold `Super` to open on left) |
 | `Ctrl + F` | Toggle Find & Replace bar |
-| `Ctrl + B` | Bold (or toggle sidebar) |
-| `Ctrl + I` | Italic |
-| `Ctrl + U` | Underline |
-| `Ctrl + K` | Insert link |
-| `Ctrl + M` | Cycle editor mode (Visual -> Split -> Source) |
-| `Ctrl + 1..6` | Format as Heading 1..6 |
+| `Ctrl + M` | Cycle editor mode (Visual → Split → Source) |
 | `Alt + 1` | Switch to WYSIWYG Mode |
 | `Alt + 2` | Switch to Split Mode |
 | `Alt + 3` | Switch to Source Mode |

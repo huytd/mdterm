@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -16,7 +17,13 @@ pub struct PtySession {
 
 #[derive(Default)]
 pub struct PtyState {
-    session: Mutex<Option<PtySession>>,
+    sessions: Mutex<HashMap<String, PtySession>>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct PtyOutputPayload {
+    pub id: String,
+    pub data: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -234,7 +241,14 @@ fn get_cli_file() -> Option<String> {
 }
 
 #[tauri::command]
-fn pty_spawn(app: AppHandle, state: State<PtyState>, cols: u16, rows: u16) -> Result<(), String> {
+fn pty_spawn(
+    app: AppHandle,
+    state: State<PtyState>,
+    session_id: Option<String>,
+    cols: u16,
+    rows: u16,
+) -> Result<String, String> {
+    let id = session_id.unwrap_or_else(|| "1".to_string());
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
@@ -282,15 +296,19 @@ fn pty_spawn(app: AppHandle, state: State<PtyState>, cols: u16, rows: u16) -> Re
 
     // Store in state
     {
-        let mut sess = state.session.lock().map_err(|_| "Failed to lock PTY state".to_string())?;
-        *sess = Some(PtySession {
-            master: pair.master,
-            writer,
-            child_pid,
-        });
+        let mut sess = state.sessions.lock().map_err(|_| "Failed to lock PTY state".to_string())?;
+        sess.insert(
+            id.clone(),
+            PtySession {
+                master: pair.master,
+                writer,
+                child_pid,
+            },
+        );
     }
 
     // Spawn reader thread
+    let session_id_clone = id.clone();
     std::thread::spawn(move || {
         let mut buffer = [0u8; 4096];
         loop {
@@ -300,23 +318,33 @@ fn pty_spawn(app: AppHandle, state: State<PtyState>, cols: u16, rows: u16) -> Re
                 }
                 Ok(n) => {
                     let text = String::from_utf8_lossy(&buffer[..n]).to_string();
-                    let _ = app.emit("pty-output", text);
+                    let _ = app.emit("pty-output", PtyOutputPayload {
+                        id: session_id_clone.clone(),
+                        data: text.clone(),
+                    });
+                    let _ = app.emit(&format!("pty-output-{}", session_id_clone), text);
                 }
                 Err(_) => {
                     break;
                 }
             }
         }
-        app.exit(0);
+        let _ = app.emit("pty-exit", session_id_clone.clone());
+        let _ = app.emit(&format!("pty-exit-{}", session_id_clone), ());
     });
 
-    Ok(())
+    Ok(id)
 }
 
 #[tauri::command]
-fn pty_get_cwd(state: State<PtyState>) -> Result<String, String> {
-    let sess = state.session.lock().map_err(|_| "Lock error".to_string())?;
-    if let Some(session) = sess.as_ref() {
+fn pty_get_cwd(state: State<PtyState>, session_id: Option<String>) -> Result<String, String> {
+    let sess = state.sessions.lock().map_err(|_| "Lock error".to_string())?;
+    let target = session_id
+        .as_ref()
+        .and_then(|id| sess.get(id))
+        .or_else(|| sess.values().next());
+
+    if let Some(session) = target {
         if let Some(pid) = session.child_pid {
             let _ = pid;
             // Check tmux pane_current_path if tmux is running
@@ -349,9 +377,14 @@ fn pty_get_cwd(state: State<PtyState>) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn pty_write(state: State<PtyState>, data: String) -> Result<(), String> {
-    let mut sess = state.session.lock().map_err(|_| "Lock error".to_string())?;
-    if let Some(session) = sess.as_mut() {
+fn pty_write(state: State<PtyState>, session_id: Option<String>, data: String) -> Result<(), String> {
+    let mut sess = state.sessions.lock().map_err(|_| "Lock error".to_string())?;
+    let target = match session_id {
+        Some(ref id) => sess.get_mut(id),
+        None => sess.values_mut().next(),
+    };
+
+    if let Some(session) = target {
         let bytes = data.as_bytes();
         for chunk in bytes.chunks(4096) {
             session.writer.write_all(chunk)
@@ -366,9 +399,14 @@ fn pty_write(state: State<PtyState>, data: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn pty_resize(state: State<PtyState>, cols: u16, rows: u16) -> Result<(), String> {
-    let sess = state.session.lock().map_err(|_| "Lock error".to_string())?;
-    if let Some(session) = sess.as_ref() {
+fn pty_resize(state: State<PtyState>, session_id: Option<String>, cols: u16, rows: u16) -> Result<(), String> {
+    let sess = state.sessions.lock().map_err(|_| "Lock error".to_string())?;
+    let target = match session_id {
+        Some(ref id) => sess.get(id),
+        None => sess.values().next(),
+    };
+
+    if let Some(session) = target {
         session.master.resize(PtySize {
             rows: rows.max(1),
             cols: cols.max(1),
@@ -379,6 +417,13 @@ fn pty_resize(state: State<PtyState>, cols: u16, rows: u16) -> Result<(), String
     } else {
         Err("No active PTY session".to_string())
     }
+}
+
+#[tauri::command]
+fn pty_close(state: State<PtyState>, session_id: String) -> Result<(), String> {
+    let mut sess = state.sessions.lock().map_err(|_| "Lock error".to_string())?;
+    sess.remove(&session_id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -452,6 +497,7 @@ pub fn run() {
             pty_get_cwd,
             pty_write,
             pty_resize,
+            pty_close,
             get_cli_file,
             get_terminal_config,
             get_config_path,
