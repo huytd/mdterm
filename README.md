@@ -261,21 +261,22 @@ character_height: 1.25
 | Shortcut | Action |
 | :--- | :--- |
 | `Super + Alt + T` / `Ctrl + Alt + T` | Cycle Theme (Dark → Light → Nord → Monokai) |
-| `Super + T` / `Ctrl + T` | Create new tab |
-| `Super + 1..9` / `Ctrl + 1..9` | Switch directly to Tab 1 through 9 |
+| `Super + T` | Create new tab |
+| `Super + 1..9` | Switch directly to Tab 1 through 9 |
 | `Ctrl + Tab` / `Ctrl + Shift + Tab` | Cycle to next / previous tab |
-| `Super + W` / `Ctrl + W` | Close active editor / close active tab (never closes window) |
-| `Super + Q` / `Ctrl + Q` | Close application window |
-| `Super + S` / `Ctrl + S` | Save active document (local disk or remote SSH) |
-| `Super + O` / `Ctrl + O` | Open file (Hold `Super` to open editor on left) |
-| `Super + N` / `Ctrl + N` | Create new document (Hold `Super` to open on left) |
-| `Ctrl + F` | Toggle Find & Replace bar |
-| `Ctrl + M` | Cycle editor mode (Visual → Split → Source) |
+| `Super + W` | Close active editor / close active tab (never closes window) |
+| `Super + Q` | Close application window |
+| `Super + F` | Toggle Find & Replace bar (leaves `Ctrl + F` for terminal Emacs navigation) |
+| `Super + S` | Save active document (local disk or remote SSH) |
+| `Super + O` | Open file modal |
+| `Super + N` | Create new document |
+| `Super + M` | Cycle editor mode (Visual → Split → Source) |
 | `Alt + 1` | Switch to WYSIWYG Mode |
 | `Alt + 2` | Switch to Split Mode |
 | `Alt + 3` | Switch to Source Mode |
 | `/` | Open Slash Command popup on any line |
 | `Tab` / `Shift+Tab` | Indent / Outdent list item or insert spaces |
+| `Ctrl + F / B / A / E / ...` | Terminal Emacs readline navigation (forward, backward, line start/end) |
 
 ---
 

@@ -659,24 +659,24 @@ pub fn App() -> impl IntoView {
 
     // Global keyboard shortcut listener
     let on_window_keydown = move |ev: KeyboardEvent| {
-        let is_meta = ev.meta_key()
+        let is_super = ev.meta_key()
             || ev.get_modifier_state("Meta")
             || ev.get_modifier_state("Super")
             || ev.get_modifier_state("OS");
-        let is_ctrl = ev.ctrl_key() || is_meta;
+        let is_ctrl = ev.ctrl_key();
         let is_alt = ev.alt_key();
         let key = ev.key().to_lowercase();
 
         // 1. Theme cycling: Super + Alt + T or Ctrl + Alt + T
-        if is_ctrl && is_alt && key == "t" {
+        if (is_super || is_ctrl) && is_alt && key == "t" {
             ev.prevent_default();
             ev.stop_propagation();
             current_theme.update(|t| *t = t.next());
             return;
         }
 
-        // 2. Tab Creation: Super + T or Ctrl + T (when not Alt) -> creates a new tab every time
-        if is_ctrl && !is_alt && key == "t" {
+        // 2. Tab Creation: Super + T (when not Alt) -> creates a new tab every time
+        if is_super && !is_alt && key == "t" {
             ev.prevent_default();
             ev.stop_propagation();
             create_new_tab.run(());
@@ -684,7 +684,7 @@ pub fn App() -> impl IntoView {
         }
 
         // 3. Tab cycling: Ctrl + Tab / Super + Tab (forward or backward with Shift)
-        if is_ctrl && key == "tab" {
+        if (is_super || is_ctrl) && key == "tab" {
             ev.prevent_default();
             ev.stop_propagation();
             let list = tabs.get();
@@ -701,8 +701,8 @@ pub fn App() -> impl IntoView {
             return;
         }
 
-        // 4. Tab switching by number: Super + 1..9 or Ctrl + 1..9 (when not Alt)
-        if is_ctrl && !is_alt {
+        // 4. Tab switching by number: Super + 1..9 (when not Alt)
+        if is_super && !is_alt {
             if let Ok(num) = key.parse::<usize>() {
                 if num >= 1 && num <= 9 {
                     ev.prevent_default();
@@ -718,7 +718,7 @@ pub fn App() -> impl IntoView {
         }
 
         // 5. Editor Mode switching: Alt + 1..3 (when not Ctrl/Super)
-        if is_alt && !is_ctrl {
+        if is_alt && !is_super && !is_ctrl {
             if let Some(active_tab) = get_active_tab() {
                 match key.as_str() {
                     "1" => {
@@ -741,16 +741,16 @@ pub fn App() -> impl IntoView {
             }
         }
 
-        // 6. Close Window: Super + Q or Ctrl + Q ONLY
-        if is_ctrl && !is_alt && key == "q" {
+        // 6. Close Window: Super + Q ONLY
+        if is_super && !is_alt && key == "q" {
             ev.prevent_default();
             ev.stop_propagation();
             tauri_bridge::window_close();
             return;
         }
 
-        // 7. Close Editor / Close Tab: Super + W or Ctrl + W (NEVER closes window)
-        if is_ctrl && !is_alt && key == "w" {
+        // 7. Close Editor / Close Tab: Super + W (NEVER closes window)
+        if is_super && !is_alt && key == "w" {
             ev.prevent_default();
             ev.stop_propagation();
             if let Some(active_tab) = get_active_tab() {
@@ -763,8 +763,16 @@ pub fn App() -> impl IntoView {
             return;
         }
 
-        // 8. Document & window shortcuts: Super/Ctrl + key
-        if is_ctrl && !is_alt {
+        // 8. Find & Replace: Super + F ONLY (Ctrl + F is forwarded to terminal for Emacs navigation)
+        if is_super && !is_alt && key == "f" {
+            ev.prevent_default();
+            ev.stop_propagation();
+            find_replace.update(|s| s.is_open = !s.is_open);
+            return;
+        }
+
+        // 9. Document & window shortcuts: Super + key
+        if is_super && !is_alt {
             match key.as_str() {
                 "s" => {
                     ev.prevent_default();
@@ -775,23 +783,14 @@ pub fn App() -> impl IntoView {
                     ev.prevent_default();
                     ev.stop_propagation();
                     if let Some(active_tab) = get_active_tab() {
-                        if ev.meta_key() {
-                            active_tab.editor_position.set(EditorPosition::Left);
-                        } else {
-                            active_tab.editor_position.set(EditorPosition::Right);
-                        }
+                        active_tab.editor_position.set(EditorPosition::Right);
                     }
                     active_modal.set(ActiveModal::OpenFile);
                 }
                 "n" => {
                     ev.prevent_default();
                     ev.stop_propagation();
-                    handle_new_file.run(ev.meta_key());
-                }
-                "f" => {
-                    ev.prevent_default();
-                    ev.stop_propagation();
-                    find_replace.update(|s| s.is_open = !s.is_open);
+                    handle_new_file.run(false);
                 }
                 "m" => {
                     ev.prevent_default();

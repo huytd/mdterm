@@ -708,26 +708,29 @@ export async function initTerminalSession(containerId, sessionId) {
             event.getModifierState('Super') ||
             event.getModifierState('OS')
         )));
-        const isCtrl = event.ctrlKey || isSuper;
+        const isCtrl = event.ctrlKey;
         const isAlt = event.altKey;
 
-        // Pass through tab switching & theme shortcuts to window listener
-        if (isCtrl && key === 't') {
+        // Pass through Super shortcuts & theme shortcuts to window listener
+        if ((isSuper || isCtrl) && isAlt && key === 't') {
             return false;
         }
-        if (isCtrl && !isAlt && key >= '1' && key <= '9') {
+        if (isSuper && !isAlt && key === 't') {
             return false;
         }
-        if (isCtrl && key === 'w') {
+        if (isSuper && !isAlt && key >= '1' && key <= '9') {
             return false;
         }
-        if (isCtrl && key === 'q') {
+        if (isSuper && key === 'w') {
             return false;
         }
-        if (isCtrl && key === 'tab') {
+        if (isSuper && key === 'q') {
             return false;
         }
-        if (isCtrl && (key === 'n' || key === 'o' || key === 's' || key === 'f' || key === 'm')) {
+        if ((isSuper || isCtrl) && key === 'tab') {
+            return false;
+        }
+        if (isSuper && (key === 'n' || key === 'o' || key === 's' || key === 'f' || key === 'm')) {
             return false;
         }
 
