@@ -670,39 +670,43 @@ pub fn App() -> impl IntoView {
         // 1. Theme cycling: Super + Alt + T or Ctrl + Alt + T
         if is_ctrl && is_alt && key == "t" {
             ev.prevent_default();
+            ev.stop_propagation();
             current_theme.update(|t| *t = t.next());
             return;
         }
 
-        // 2. Tab switching & Creation: Super + T or Ctrl + T (when not Alt)
+        // 2. Tab Creation: Super + T or Ctrl + T (when not Alt) -> creates a new tab every time
         if is_ctrl && !is_alt && key == "t" {
             ev.prevent_default();
+            ev.stop_propagation();
+            create_new_tab.run(());
+            return;
+        }
+
+        // 3. Tab cycling: Ctrl + Tab / Super + Tab (forward or backward with Shift)
+        if is_ctrl && key == "tab" {
+            ev.prevent_default();
+            ev.stop_propagation();
             let list = tabs.get();
-            if list.len() <= 1 {
-                create_new_tab.run(());
-            } else if let Some(prev) = previous_tab_id.get() {
-                let cur = active_tab_id.get();
-                if prev != cur && list.iter().any(|t| t.id.get() == prev) {
-                    select_tab_by_id.run(prev);
-                } else {
-                    let cur_idx = list.iter().position(|t| t.id.get() == cur).unwrap_or(0);
-                    let next_idx = (cur_idx + 1) % list.len();
-                    select_tab_by_id.run(list[next_idx].id.get());
-                }
-            } else {
+            if list.len() > 1 {
                 let cur = active_tab_id.get();
                 let cur_idx = list.iter().position(|t| t.id.get() == cur).unwrap_or(0);
-                let next_idx = (cur_idx + 1) % list.len();
+                let next_idx = if ev.shift_key() {
+                    if cur_idx == 0 { list.len() - 1 } else { cur_idx - 1 }
+                } else {
+                    (cur_idx + 1) % list.len()
+                };
                 select_tab_by_id.run(list[next_idx].id.get());
             }
             return;
         }
 
-        // 3. Tab switching by number: Super + 1..9 or Ctrl + 1..9 (when not Alt)
+        // 4. Tab switching by number: Super + 1..9 or Ctrl + 1..9 (when not Alt)
         if is_ctrl && !is_alt {
             if let Ok(num) = key.parse::<usize>() {
                 if num >= 1 && num <= 9 {
                     ev.prevent_default();
+                    ev.stop_propagation();
                     let list = tabs.get();
                     let idx = num - 1;
                     if idx < list.len() {
@@ -713,20 +717,23 @@ pub fn App() -> impl IntoView {
             }
         }
 
-        // 4. Editor Mode switching: Alt + 1..3 (when not Ctrl/Super)
+        // 5. Editor Mode switching: Alt + 1..3 (when not Ctrl/Super)
         if is_alt && !is_ctrl {
             if let Some(active_tab) = get_active_tab() {
                 match key.as_str() {
                     "1" => {
                         ev.prevent_default();
+                        ev.stop_propagation();
                         active_tab.active_mode.set(EditorMode::Wysiwyg);
                     }
                     "2" => {
                         ev.prevent_default();
+                        ev.stop_propagation();
                         active_tab.active_mode.set(EditorMode::Split);
                     }
                     "3" => {
                         ev.prevent_default();
+                        ev.stop_propagation();
                         active_tab.active_mode.set(EditorMode::Source);
                     }
                     _ => {}
@@ -734,15 +741,39 @@ pub fn App() -> impl IntoView {
             }
         }
 
-        // 5. Document & window shortcuts: Super/Ctrl + key
+        // 6. Close Window: Super + Q or Ctrl + Q ONLY
+        if is_ctrl && !is_alt && key == "q" {
+            ev.prevent_default();
+            ev.stop_propagation();
+            tauri_bridge::window_close();
+            return;
+        }
+
+        // 7. Close Editor / Close Tab: Super + W or Ctrl + W (NEVER closes window)
+        if is_ctrl && !is_alt && key == "w" {
+            ev.prevent_default();
+            ev.stop_propagation();
+            if let Some(active_tab) = get_active_tab() {
+                if active_tab.is_editor_open.get() {
+                    handle_close_editor.run(());
+                } else if tabs.get().len() > 1 {
+                    close_tab_by_id.run(active_tab.id.get());
+                }
+            }
+            return;
+        }
+
+        // 8. Document & window shortcuts: Super/Ctrl + key
         if is_ctrl && !is_alt {
             match key.as_str() {
                 "s" => {
                     ev.prevent_default();
+                    ev.stop_propagation();
                     save_active_document();
                 }
                 "o" => {
                     ev.prevent_default();
+                    ev.stop_propagation();
                     if let Some(active_tab) = get_active_tab() {
                         if ev.meta_key() {
                             active_tab.editor_position.set(EditorPosition::Left);
@@ -754,24 +785,17 @@ pub fn App() -> impl IntoView {
                 }
                 "n" => {
                     ev.prevent_default();
+                    ev.stop_propagation();
                     handle_new_file.run(ev.meta_key());
                 }
                 "f" => {
                     ev.prevent_default();
+                    ev.stop_propagation();
                     find_replace.update(|s| s.is_open = !s.is_open);
-                }
-                "w" => {
-                    ev.prevent_default();
-                    if let Some(active_tab) = get_active_tab() {
-                        if active_tab.is_editor_open.get() {
-                            handle_close_editor.run(());
-                        } else if tabs.get().len() > 1 {
-                            close_tab_by_id.run(active_tab.id.get());
-                        }
-                    }
                 }
                 "m" => {
                     ev.prevent_default();
+                    ev.stop_propagation();
                     if let Some(active_tab) = get_active_tab() {
                         active_tab.active_mode.update(|m| *m = match *m {
                             EditorMode::Wysiwyg => EditorMode::Split,

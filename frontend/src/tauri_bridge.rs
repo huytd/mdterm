@@ -721,6 +721,12 @@ export async function initTerminalSession(containerId, sessionId) {
         if (isCtrl && key === 'w') {
             return false;
         }
+        if (isCtrl && key === 'q') {
+            return false;
+        }
+        if (isCtrl && key === 'tab') {
+            return false;
+        }
         if (isCtrl && (key === 'n' || key === 'o' || key === 's' || key === 'f' || key === 'm')) {
             return false;
         }

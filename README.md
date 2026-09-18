@@ -261,9 +261,11 @@ character_height: 1.25
 | Shortcut | Action |
 | :--- | :--- |
 | `Super + Alt + T` / `Ctrl + Alt + T` | Cycle Theme (Dark → Light → Nord → Monokai) |
-| `Super + T` / `Ctrl + T` | Switch back & forth between tabs (or create new tab) |
+| `Super + T` / `Ctrl + T` | Create new tab |
 | `Super + 1..9` / `Ctrl + 1..9` | Switch directly to Tab 1 through 9 |
-| `Super + W` / `Ctrl + W` | Close active editor / close active tab |
+| `Ctrl + Tab` / `Ctrl + Shift + Tab` | Cycle to next / previous tab |
+| `Super + W` / `Ctrl + W` | Close active editor / close active tab (never closes window) |
+| `Super + Q` / `Ctrl + Q` | Close application window |
 | `Super + S` / `Ctrl + S` | Save active document (local disk or remote SSH) |
 | `Super + O` / `Ctrl + O` | Open file (Hold `Super` to open editor on left) |
 | `Super + N` / `Ctrl + N` | Create new document (Hold `Super` to open on left) |
