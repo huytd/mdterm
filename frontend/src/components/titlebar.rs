@@ -88,7 +88,7 @@ pub fn TitleBar(
                             view! {
                                 <div
                                     class=tab_class
-                                    title=move || format!("Tab {} (Super+{})", tab_index.get() + 1, tab_index.get() + 1)
+                                    title=move || format!("Tab {} (Ctrl+Shift+{} / Super+{})", tab_index.get() + 1, tab_index.get() + 1, tab_index.get() + 1)
                                     on:click=move |ev| {
                                         ev.stop_propagation();
                                         on_select_tab.run(tid_select.clone());
@@ -124,7 +124,7 @@ pub fn TitleBar(
                                                 <button
                                                     type="button"
                                                     class="tab-close-btn"
-                                                    title="Close tab (Super+W)"
+                                                    title="Close tab (Ctrl+Shift+W / Super+W)"
                                                     on:click=move |ev: MouseEvent| {
                                                         ev.stop_propagation();
                                                         on_close_tab.run(tid_c.clone());
@@ -145,7 +145,7 @@ pub fn TitleBar(
                     <button
                         type="button"
                         class="titlebar-new-tab-btn"
-                        title="New Tab (Super+T)"
+                        title="New Tab (Ctrl+Shift+T / Super+T)"
                         on:click=move |ev: MouseEvent| {
                             ev.stop_propagation();
                             on_new_tab.run(());

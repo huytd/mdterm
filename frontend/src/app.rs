@@ -661,6 +661,33 @@ pub fn App() -> impl IntoView {
         }
     });
 
+    fn is_terminal_focused() -> bool {
+        if let Some(win) = web_sys::window() {
+            if let Some(doc) = win.document() {
+                if let Some(el) = doc.active_element() {
+                    let tag = el.tag_name().to_uppercase();
+                    let class_name = el.class_name();
+                    if tag == "INPUT" || el.get_attribute("contenteditable").as_deref() == Some("true") {
+                        return false;
+                    }
+                    if tag == "TEXTAREA" {
+                        return class_name.contains("xterm-helper-textarea");
+                    }
+                    if class_name.contains("wysiwyg-surface") || class_name.contains("source-textarea") {
+                        return false;
+                    }
+                    if let Ok(Some(_)) = el.closest(".editor-pane, .modal-content, .wysiwyg-container, .source-editor-container, .modal-backdrop, .floating-terminal-bar, .titlebar-container") {
+                        return false;
+                    }
+                    if let Ok(Some(_)) = el.closest(".terminal-pane, .terminal-container") {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
     // Global keyboard shortcut listener
     let on_window_keydown = move |ev: KeyboardEvent| {
         let is_super = ev.meta_key()
@@ -669,9 +696,11 @@ pub fn App() -> impl IntoView {
             || ev.get_modifier_state("OS");
         let is_ctrl = ev.ctrl_key();
         let is_alt = ev.alt_key();
+        let is_shift = ev.shift_key();
         let key = ev.key().to_lowercase();
+        let is_term = is_terminal_focused();
 
-        // 1. Theme cycling: Super + Alt + T or Ctrl + Alt + T
+        // 1. Theme cycling: (Super or Ctrl) + Alt + T
         if (is_super || is_ctrl) && is_alt && key == "t" {
             ev.prevent_default();
             ev.stop_propagation();
@@ -679,23 +708,24 @@ pub fn App() -> impl IntoView {
             return;
         }
 
-        // 2. Tab Creation: Super + T (when not Alt) -> creates a new tab every time
-        if is_super && !is_alt && key == "t" {
+        // 2. Tab Creation: Super + T OR Ctrl + Shift + T OR Ctrl + T (when not in terminal)
+        if (is_super || (is_ctrl && is_shift) || (is_ctrl && !is_term)) && !is_alt && key == "t" {
             ev.prevent_default();
             ev.stop_propagation();
             create_new_tab.run(());
             return;
         }
 
-        // 3. Tab cycling: Ctrl + Tab / Super + Tab (forward or backward with Shift)
-        if (is_super || is_ctrl) && key == "tab" {
+        // 3. Tab cycling: Ctrl + Tab / Super + Tab / Ctrl + PageUp / Ctrl + PageDown (with Shift for reverse)
+        if (is_super || is_ctrl) && (key == "tab" || key == "pageup" || key == "pagedown") {
             ev.prevent_default();
             ev.stop_propagation();
             let list = tabs.get();
             if list.len() > 1 {
                 let cur = active_tab_id.get();
                 let cur_idx = list.iter().position(|t| t.id.get() == cur).unwrap_or(0);
-                let next_idx = if ev.shift_key() {
+                let is_prev = (key == "tab" && is_shift) || key == "pageup";
+                let next_idx = if is_prev {
                     if cur_idx == 0 { list.len() - 1 } else { cur_idx - 1 }
                 } else {
                     (cur_idx + 1) % list.len()
@@ -705,8 +735,8 @@ pub fn App() -> impl IntoView {
             return;
         }
 
-        // 4. Tab switching by number: Super + 1..9 (when not Alt)
-        if is_super && !is_alt {
+        // 4. Tab switching by number: Super + 1..9 OR Ctrl + Shift + 1..9 OR Ctrl + 1..9 (in editor/UI)
+        if (is_super || (is_ctrl && is_shift) || (is_ctrl && !is_term)) && !is_alt {
             if let Ok(num) = key.parse::<usize>() {
                 if num >= 1 && num <= 9 {
                     ev.prevent_default();
@@ -745,16 +775,16 @@ pub fn App() -> impl IntoView {
             }
         }
 
-        // 6. Close Window: Super + Q ONLY
-        if is_super && !is_alt && key == "q" {
+        // 6. Close Window: Super + Q OR Ctrl + Shift + Q
+        if (is_super || (is_ctrl && is_shift)) && !is_alt && key == "q" {
             ev.prevent_default();
             ev.stop_propagation();
             tauri_bridge::window_close();
             return;
         }
 
-        // 7. Close Editor / Close Tab / Quit App on 1 tab: Super + W
-        if is_super && !is_alt && key == "w" {
+        // 7. Close Editor / Close Tab: Super + W OR Ctrl + Shift + W OR Ctrl + W (in editor/UI)
+        if (is_super || (is_ctrl && is_shift) || (is_ctrl && !is_term)) && !is_alt && key == "w" {
             ev.prevent_default();
             ev.stop_propagation();
             if let Some(active_tab) = get_active_tab() {
@@ -771,16 +801,16 @@ pub fn App() -> impl IntoView {
             return;
         }
 
-        // 8. Find & Replace: Super + F ONLY (Ctrl + F is forwarded to terminal for Emacs navigation)
-        if is_super && !is_alt && key == "f" {
+        // 8. Find & Replace: Super + F OR Ctrl + Shift + F OR Ctrl + F (in editor/UI)
+        if (is_super || (is_ctrl && is_shift) || (is_ctrl && !is_term)) && !is_alt && key == "f" {
             ev.prevent_default();
             ev.stop_propagation();
             find_replace.update(|s| s.is_open = !s.is_open);
             return;
         }
 
-        // 9. Document & window shortcuts: Super + key
-        if is_super && !is_alt {
+        // 9. Document & window shortcuts: Super + key OR Ctrl + Shift + key OR Ctrl + key (in editor/UI)
+        if (is_super || (is_ctrl && is_shift) || (is_ctrl && !is_term)) && !is_alt {
             match key.as_str() {
                 "s" => {
                     ev.prevent_default();
@@ -815,6 +845,22 @@ pub fn App() -> impl IntoView {
             }
         }
     };
+
+    // Attach global keyboard listener to window
+    Effect::new({
+        let on_window_keydown = on_window_keydown.clone();
+        move |_| {
+            if let Some(win) = web_sys::window() {
+                let handler = on_window_keydown.clone();
+                let cb = wasm_bindgen::closure::Closure::wrap(Box::new(move |ev: web_sys::KeyboardEvent| {
+                    handler(ev);
+                }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+
+                let _ = win.add_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref());
+                cb.forget();
+            }
+        }
+    });
 
     // Resizing mouse handlers
     let on_mouse_move = move |ev: MouseEvent| {

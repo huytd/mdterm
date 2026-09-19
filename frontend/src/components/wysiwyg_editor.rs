@@ -153,7 +153,7 @@ pub fn WysiwygEditor(
             }
         }
 
-        if key == "Tab" {
+        if key == "Tab" && !ev.ctrl_key() && !ev.meta_key() && !ev.alt_key() {
             ev.prevent_default();
             if ev.shift_key() {
                 exec_editor_cmd("outdent", None);

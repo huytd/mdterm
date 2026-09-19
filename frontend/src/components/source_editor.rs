@@ -43,7 +43,7 @@ pub fn SourceEditor(
     let handle_keydown = move |ev: KeyboardEvent| {
         let key = ev.key();
 
-        if key == "Tab" {
+        if key == "Tab" && !ev.ctrl_key() && !ev.meta_key() && !ev.alt_key() {
             ev.prevent_default();
             if let Some(ta) = textarea_ref.get() {
                 let ta_el: &HtmlTextAreaElement = ta.as_ref();

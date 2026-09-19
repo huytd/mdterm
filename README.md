@@ -258,25 +258,34 @@ character_height: 1.25
 
 ## ⌨️ Keyboard Shortcuts Cheatsheet
 
-| Shortcut | Action |
-| :--- | :--- |
-| `Super + Alt + T` / `Ctrl + Alt + T` | Cycle Theme (Dark → Light → Nord → Monokai) |
-| `Super + T` | Create new tab |
-| `Super + 1..9` | Switch directly to Tab 1 through 9 |
-| `Ctrl + Tab` / `Ctrl + Shift + Tab` | Cycle to next / previous tab |
-| `Super + W` | Close active editor / close active tab (never closes window) |
-| `Super + Q` | Close application window |
-| `Super + F` | Toggle Find & Replace bar (leaves `Ctrl + F` for terminal Emacs navigation) |
-| `Super + S` | Save active document (local disk or remote SSH) |
-| `Super + O` | Open file modal |
-| `Super + N` | Create new document |
-| `Super + M` | Cycle editor mode (Visual → Split → Source) |
-| `Alt + 1` | Switch to WYSIWYG Mode |
-| `Alt + 2` | Switch to Split Mode |
-| `Alt + 3` | Switch to Source Mode |
-| `/` | Open Slash Command popup on any line |
-| `Tab` / `Shift+Tab` | Indent / Outdent list item or insert spaces |
-| `Ctrl + F / B / A / E / ...` | Terminal Emacs readline navigation (forward, backward, line start/end) |
+| Shortcut | Context | Action |
+| :--- | :--- | :--- |
+| `Ctrl + Shift + T` / `Super + T` | Anywhere | Create new workspace tab (unlimited tabs) |
+| `Ctrl + T` | In Editor / UI | Create new workspace tab |
+| `Ctrl + Shift + W` / `Super + W` | Anywhere | Close active editor (returns to terminal) / close active tab |
+| `Ctrl + W` | In Editor / UI | Close editor pane (returns to full-screen terminal) |
+| `Ctrl + Tab` / `Ctrl + Shift + Tab` | Anywhere | Cycle forward / backward through tabs |
+| `Ctrl + PageUp` / `Ctrl + PageDown` | Anywhere | Switch to previous / next tab |
+| `Ctrl + Shift + 1..9` / `Super + 1..9` | Anywhere | Switch directly to Tab 1 through 9 |
+| `Ctrl + 1..9` | In Editor / UI | Switch directly to Tab 1 through 9 |
+| `Ctrl + Shift + F` / `Super + F` | Anywhere | Toggle Find & Replace bar (leaves `Ctrl + F` for terminal readline) |
+| `Ctrl + F` | In Editor / UI | Toggle Find & Replace bar |
+| `Ctrl + Shift + S` / `Super + S` | Anywhere | Save active document (local disk or remote SSH) |
+| `Ctrl + S` | In Editor / UI | Save active document |
+| `Ctrl + Shift + O` / `Super + O` | Anywhere | Open file modal |
+| `Ctrl + O` | In Editor / UI | Open file modal |
+| `Ctrl + Shift + N` / `Super + N` | Anywhere | Create new document |
+| `Ctrl + N` | In Editor / UI | Create new document |
+| `Ctrl + Shift + M` / `Super + M` | Anywhere | Cycle editor mode (Visual → Split → Source) |
+| `Ctrl + M` | In Editor / UI | Cycle editor mode |
+| `Alt + 1` | Anywhere | Switch to Visual WYSIWYG Mode |
+| `Alt + 2` | Anywhere | Switch to Split Mode |
+| `Alt + 3` | Anywhere | Switch to Source Mode |
+| `Ctrl + Alt + T` / `Super + Alt + T` | Anywhere | Cycle Theme (Dark → Light → Nord → Monokai) |
+| `Ctrl + Shift + Q` / `Super + Q` | Anywhere | Close application window |
+| `/` | In WYSIWYG | Open Slash Command popup on any line |
+| `Tab` / `Shift + Tab` | In Editor | Indent / Outdent list item or insert spaces |
+| `Ctrl + F / B / A / E / ...` | In Terminal | Terminal Emacs readline navigation (forward, backward, line start/end) |
 
 ---
 

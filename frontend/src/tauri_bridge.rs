@@ -710,27 +710,52 @@ export async function initTerminalSession(containerId, sessionId) {
         )));
         const isCtrl = event.ctrlKey;
         const isAlt = event.altKey;
+        const isShift = event.shiftKey;
 
-        // Pass through Super shortcuts & theme shortcuts to window listener
+        // 1. Theme cycling: (Super or Ctrl) + Alt + T
         if ((isSuper || isCtrl) && isAlt && key === 't') {
             return false;
         }
-        if (isSuper && !isAlt && key === 't') {
+
+        // 2. Tab creation: Super + T OR Ctrl + Shift + T
+        if ((isSuper && !isAlt && key === 't') || (isCtrl && isShift && !isAlt && key === 't')) {
             return false;
         }
-        if (isSuper && !isAlt && key >= '1' && key <= '9') {
+
+        // 3. Tab / Editor closing: Super + W OR Ctrl + Shift + W
+        if ((isSuper && !isAlt && key === 'w') || (isCtrl && isShift && !isAlt && key === 'w')) {
             return false;
         }
-        if (isSuper && key === 'w') {
+
+        // 4. Tab cycling: Ctrl + Tab / Super + Tab / Ctrl + PageUp / Ctrl + PageDown
+        if ((isSuper || isCtrl) && (key === 'tab' || key === 'pageup' || key === 'pagedown')) {
             return false;
         }
-        if (isSuper && key === 'q') {
+
+        // 5. Tab switching by number: Super + 1..9 OR Ctrl + Shift + 1..9
+        if ((isSuper || (isCtrl && isShift)) && !isAlt && key >= '1' && key <= '9') {
             return false;
         }
-        if ((isSuper || isCtrl) && key === 'tab') {
+
+        // 6. Editor mode switching: Alt + 1..3 OR Super + M OR Ctrl + Shift + M
+        if ((isAlt && !isSuper && !isCtrl && (key === '1' || key === '2' || key === '3')) ||
+            (isSuper && !isAlt && key === 'm') ||
+            (isCtrl && isShift && !isAlt && key === 'm')) {
             return false;
         }
-        if (isSuper && (key === 'n' || key === 'o' || key === 's' || key === 'f' || key === 'm')) {
+
+        // 7. Find & Replace: Super + F OR Ctrl + Shift + F (Ctrl + F alone goes to shell)
+        if ((isSuper && !isAlt && key === 'f') || (isCtrl && isShift && !isAlt && key === 'f')) {
+            return false;
+        }
+
+        // 8. Document shortcuts: Super + (S/O/N) OR Ctrl + Shift + (S/O/N)
+        if ((isSuper || (isCtrl && isShift)) && !isAlt && (key === 's' || key === 'o' || key === 'n')) {
+            return false;
+        }
+
+        // 9. Window close: Super + Q OR Ctrl + Shift + Q
+        if ((isSuper || (isCtrl && isShift)) && !isAlt && key === 'q') {
             return false;
         }
 

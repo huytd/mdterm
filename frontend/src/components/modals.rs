@@ -549,15 +549,29 @@ pub fn Modals(
                         </div>
                         <div class="modal-body">
                             <div class="help-section">
-                                <h4>"Editor Shortcuts"</h4>
+                                <h4>"Workspace & Tab Shortcuts"</h4>
                                 <div class="shortcuts-table">
-                                    <div class="sc-row"><kbd>"Ctrl + S"</kbd><span>"Save active document"</span></div>
-                                    <div class="sc-row"><kbd>"Ctrl + O"</kbd><span>"Open file"</span></div>
-                                    <div class="sc-row"><kbd>"Ctrl + N"</kbd><span>"New document"</span></div>
-                                    <div class="sc-row"><kbd>"Ctrl + B"</kbd><span>"Toggle bold / toggle sidebar"</span></div>
+                                    <div class="sc-row"><kbd>"Ctrl + Shift + T" / "Super + T"</kbd><span>"Create new tab"</span></div>
+                                    <div class="sc-row"><kbd>"Ctrl + Shift + W" / "Super + W"</kbd><span>"Close active tab / editor"</span></div>
+                                    <div class="sc-row"><kbd>"Ctrl + Tab" / "Ctrl + Shift + Tab"</kbd><span>"Cycle to next / previous tab"</span></div>
+                                    <div class="sc-row"><kbd>"Ctrl + PageUp / PageDown"</kbd><span>"Switch to previous / next tab"</span></div>
+                                    <div class="sc-row"><kbd>"Ctrl + Shift + 1..9" / "Super + 1..9"</kbd><span>"Switch directly to tab 1 through 9"</span></div>
+                                    <div class="sc-row"><kbd>"Ctrl + Alt + T" / "Super + Alt + T"</kbd><span>"Cycle theme (Dark / Light / Nord / Monokai)"</span></div>
+                                    <div class="sc-row"><kbd>"Alt + 1 / 2 / 3"</kbd><span>"Switch mode (Visual / Split / Source)"</span></div>
+                                    <div class="sc-row"><kbd>"Ctrl + Shift + M" / "Super + M"</kbd><span>"Cycle editor mode"</span></div>
+                                </div>
+                            </div>
+                            <div class="help-section">
+                                <h4>"Editor Shortcuts (when Editor is open)"</h4>
+                                <div class="shortcuts-table">
+                                    <div class="sc-row"><kbd>"Ctrl + S" / "Super + S"</kbd><span>"Save active document"</span></div>
+                                    <div class="sc-row"><kbd>"Ctrl + O" / "Super + O"</kbd><span>"Open file modal"</span></div>
+                                    <div class="sc-row"><kbd>"Ctrl + N" / "Super + N"</kbd><span>"New document"</span></div>
+                                    <div class="sc-row"><kbd>"Ctrl + F" / "Ctrl + Shift + F"</kbd><span>"Find and replace"</span></div>
+                                    <div class="sc-row"><kbd>"Ctrl + W"</kbd><span>"Close editor pane (return to terminal)"</span></div>
+                                    <div class="sc-row"><kbd>"Ctrl + B"</kbd><span>"Toggle bold"</span></div>
                                     <div class="sc-row"><kbd>"Ctrl + I"</kbd><span>"Toggle italic"</span></div>
                                     <div class="sc-row"><kbd>"Ctrl + K"</kbd><span>"Insert link"</span></div>
-                                    <div class="sc-row"><kbd>"Ctrl + F"</kbd><span>"Find and replace"</span></div>
                                     <div class="sc-row"><kbd>"Ctrl + 1..6"</kbd><span>"Format heading level 1..6"</span></div>
                                 </div>
                             </div>
