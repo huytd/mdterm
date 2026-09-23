@@ -35,6 +35,10 @@ pub struct TerminalConfig {
         deserialize_with = "deserialize_flexible_f64"
     )]
     pub character_height: Option<f64>,
+
+    /// Terminal renderer: "dom" (default) or "webgl".
+    #[serde(default)]
+    pub renderer: Option<String>,
 }
 
 impl Default for TerminalConfig {
@@ -46,6 +50,7 @@ impl Default for TerminalConfig {
             ),
             font_size: Some(13.0),
             character_height: Some(1.0),
+            renderer: Some("dom".to_string()),
         }
     }
 }
@@ -105,6 +110,10 @@ pub struct RawConfigFile {
     )]
     pub character_height: Option<f64>,
 
+    /// Terminal renderer: "dom" (default) or "webgl".
+    #[serde(default)]
+    pub renderer: Option<String>,
+
     #[serde(default)]
     pub terminal: Option<RawTerminalSection>,
 
@@ -138,6 +147,10 @@ pub struct RawTerminalSection {
         deserialize_with = "deserialize_flexible_f64"
     )]
     pub character_height: Option<f64>,
+
+    /// Terminal renderer: "dom" (default) or "webgl".
+    #[serde(default)]
+    pub renderer: Option<String>,
 
     #[serde(default)]
     pub font: Option<RawFontSection>,
@@ -221,11 +234,19 @@ impl RawConfigFile {
             .or(self.character_height)
             .or(defaults.character_height);
 
+        let renderer = self
+            .terminal
+            .as_ref()
+            .and_then(|t| t.renderer.clone())
+            .or(self.renderer)
+            .or(defaults.renderer);
+
         TerminalConfig {
             theme,
             font_family,
             font_size,
             character_height,
+            renderer,
         }
     }
 }
@@ -288,6 +309,9 @@ font_size: 13
 
 # Terminal character height (line height multiplier, e.g. 1.0, 1.25, 1.5)
 character_height: 1.0
+
+# Terminal renderer: "dom" (default, most reliable) or "webgl" (faster, GPU-dependent)
+renderer: "dom"
 "##;
 
 pub fn ensure_default_config_exists() -> Result<PathBuf, String> {
@@ -389,6 +413,7 @@ terminal:
         assert_eq!(cfg.font_family, Some("Cascadia Code".to_string()));
         assert_eq!(cfg.font_size, Some(15.0));
         assert_eq!(cfg.character_height, Some(1.2));
+        assert_eq!(cfg.renderer, Some("dom".to_string()));
     }
 
     #[test]

@@ -1,0 +1,8 @@
+{
+  "cols": 80,
+  "rows": 24,
+  "command": "python3 /home/king/code/mdterm/tests/terminal/scenarios/curses-app.py",
+  "tmux": false,
+  "xtermVersion": "6.0.0",
+  "events": []
+}

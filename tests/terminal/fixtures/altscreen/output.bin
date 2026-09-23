@@ -1,0 +1,7 @@
+[H[2JNormal buffer: before alternate screen
+Normal line 2
+[?1049h[H[2J=== Alternate Screen Buffer ===
+This is running inside 1049 alternate screen.
+It should not leak to normal screen upon exit.
+[?1049lNormal buffer: returned from alternate screen
+Final normal buffer content.

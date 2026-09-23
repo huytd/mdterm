@@ -1,0 +1,14 @@
+[H[2J=== Wide Characters & Emoji Test ===
+CJK Unified: 漢字 中文 日本語 한국어
+Hiragana / Katakana: ひらがな カタカナ
+Fullwidth ASCII: ＡＢＣＤＥＦ １２３４５６
+Emoji Basic: 😀 🎉 🚀 📦 💻 🌟 🍎
+Emoji Skin Tones: 👍 👍🏻 👍🏼 👍🏽 👍🏾 👍🏿
+Emoji Modifiers: 🧑🏻‍🍳 🧑🏼‍💻 👩🏾‍🚀 👨🏿‍🎨
+Emoji ZWJ: 👨‍👩‍👧‍👦 🏃‍♀️ 🏳️‍🌈 👁️‍🗨️
+Table Alignment Test:
+| CJK       | Emoji | Width  |
+|-----------|-------|--------|
+| 漢字測試  | 🚀🎉  | Exact  |
+| 東京都    | 🇯🇵🍵  | Exact  |
+| 한글테스트| 🇰🇷🍚  | Exact  |

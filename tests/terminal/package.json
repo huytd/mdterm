@@ -1,0 +1,21 @@
+{
+  "name": "mdterm-terminal-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test replay.test.mjs",
+    "test:visual": "playwright test",
+    "vendor:sync": "node scripts/vendor-sync.mjs"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/addon-unicode11": "0.9.0",
+    "@xterm/addon-webgl": "0.19.0",
+    "@xterm/headless": "6.0.0",
+    "@xterm/xterm": "6.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "pixelmatch": "7.2.0"
+  }
+}
