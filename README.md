@@ -252,7 +252,33 @@ font_size: 13
 
 # Character height / line height multiplier (e.g. 1.0, 1.25, 1.5)
 character_height: 1.25
+
+# Terminal renderer: "dom" (default, most reliable) or "webgl" (GPU-dependent)
+renderer: "dom"
 ```
+
+### tmux
+
+mdterm sets `TERM=xterm-256color` and `COLORTERM=truecolor`. For truecolor and flicker-free
+(synchronized) redraws inside tmux, add to `~/.tmux.conf`:
+
+```tmux
+set -as terminal-features ',xterm-256color:RGB,sync'
+```
+
+### Terminal rendering tests
+
+The terminal pipeline has a regression harness under `tests/terminal/` (see its README):
+Rust PTY stream tests, headless xterm.js replay of recorded fixtures (with tmux itself as the
+oracle for tmux scenarios), and Playwright/WebKit geometry and screenshot tests.
+
+```bash
+just test-term          # cargo tests + headless replay
+just test-term-visual   # WebKit geometry + screenshot tests
+```
+
+To turn a rendering glitch into a test, run mdterm with `MDTERM_RECORD_DIR=/tmp/mdterm-rec`,
+reproduce it, then `node tests/terminal/scripts/import-recording.mjs /tmp/mdterm-rec/<file>.bin <name>`.
 
 ---
 

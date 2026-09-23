@@ -1,0 +1,6 @@
+[H[2J[?2026h┌──────────────────────── Synchronized Output Frame ────────────────────────┐
+│ Frame rendered atomically with DECSET 2026                                │
+│ Line 1: Atomic update test                                                 │
+│ Line 2: No tearing between draw operations                                │
+└───────────────────────────────────────────────────────────────────────────┘
+[?2026l

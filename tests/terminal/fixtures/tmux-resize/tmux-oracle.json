@@ -1,0 +1,13 @@
+{
+  "panes": [
+    {
+      "id": "%0",
+      "left": 0,
+      "top": 0,
+      "width": 100,
+      "height": 29,
+      "text": "┌─────────────────────── Tmux Resize Test ───────────────────────┐              \n│ This session starts at 80x24 and will be resized to 100x30.    │              \n│ Validating SIGWINCH handling and status line relocation.       │              \n└────────────────────────────────────────────────────────────────┘              \n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+    }
+  ],
+  "status": "[mdterm] 0:mdterm*"
+}

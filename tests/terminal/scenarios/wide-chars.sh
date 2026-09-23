@@ -1,0 +1,17 @@
+#!/bin/bash
+printf '\033[H\033[2J'
+printf '=== Wide Characters & Emoji Test ===\n'
+printf 'CJK Unified: 漢字 中文 日本語 한국어\n'
+printf 'Hiragana / Katakana: ひらがな カタカナ\n'
+printf 'Fullwidth ASCII: ＡＢＣＤＥＦ １２３４５６\n'
+printf 'Emoji Basic: 😀 🎉 🚀 📦 💻 🌟 🍎\n'
+printf 'Emoji Skin Tones: 👍 👍🏻 👍🏼 👍🏽 👍🏾 👍🏿\n'
+printf 'Emoji Modifiers: 🧑🏻‍🍳 🧑🏼‍💻 👩🏾‍🚀 👨🏿‍🎨\n'
+printf 'Emoji ZWJ: 👨‍👩‍👧‍👦 🏃‍♀️ 🏳️‍🌈 👁️‍🗨️\n'
+printf 'Table Alignment Test:\n'
+printf '| CJK       | Emoji | Width  |\n'
+printf '|-----------|-------|--------|\n'
+printf '| 漢字測試  | 🚀🎉  | Exact  |\n'
+printf '| 東京都    | 🇯🇵🍵  | Exact  |\n'
+printf '| 한글테스트| 🇰🇷🍚  | Exact  |\n'
+sleep 2

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>mdterm Visual Test Harness</title>
+  <link rel="stylesheet" href="/frontend/vendor/xterm.css">
+  <link rel="stylesheet" href="/frontend/styles/main.css">
+  <script src="/frontend/vendor/xterm.js"></script>
+  <script src="/frontend/vendor/xterm-addon-fit.js"></script>
+  <script src="/frontend/vendor/xterm-addon-unicode11.js"></script>
+  <script src="/frontend/vendor/xterm-addon-webgl.js"></script>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #0f141c;
+      font-family: monospace;
+    }
+    #root {
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <div class="terminal-pane">
+      <div class="terminal-container"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { createTerminal } from '/frontend/js/terminal-core.js';
+
+    window.createTerminal = createTerminal;
+    window._currentSession = null;
+    window._resizeCallbacks = [];
+
+    window.initHarness = async function({
+      width = 800,
+      height = 600,
+      renderer = 'dom',
+      lineHeight = 1.0,
+      fontSize = 13,
+      fontFamily = 'monospace'
+    } = {}) {
+      if (window._currentSession) {
+        try {
+          window._currentSession.dispose();
+        } catch (e) {}
+        window._currentSession = null;
+      }
+
+      window._resizeCallbacks = [];
+
+      const root = document.getElementById('root');
+      root.innerHTML = '<div class="terminal-pane"><div class="terminal-container"></div></div>';
+
+      const pane = root.querySelector('.terminal-pane');
+      const container = root.querySelector('.terminal-container');
+
+      pane.style.width = width + 'px';
+      pane.style.height = height + 'px';
+      pane.style.position = 'relative';
+
+      const session = await createTerminal(container, {
+        renderer,
+        lineHeight,
+        fontSize,
+        fontFamily
+      }, {
+        onResize: (cols, rows, pw, ph) => {
+          window._resizeCallbacks.push({ cols, rows, pw, ph, t: performance.now() });
+        }
+      });
+
+      window._currentSession = session;
+      const term = session.term;
+
+      // Allow renderer and layout to settle
+      await new Promise(r => requestAnimationFrame(() => setTimeout(r, 60)));
+      if (session.fitAddon) {
+        session.fitAddon.fit();
+      }
+
+      return {
+        cols: term.cols,
+        rows: term.rows,
+        renderer: session.renderer || renderer
+      };
+    };
+
+    window.setContainerSize = function(width, height) {
+      const pane = document.querySelector('.terminal-pane');
+      if (pane) {
+        pane.style.width = width + 'px';
+        pane.style.height = height + 'px';
+      }
+    };
+
+    window.replayFixture = async function(fixtureName) {
+      if (!window._currentSession) {
+        throw new Error('No terminal session initialized');
+      }
+      const term = window._currentSession.term;
+      const res = await fetch(`/tests/terminal/fixtures/${fixtureName}/output.bin`);
+      if (!res.ok) {
+        throw new Error(`Failed to fetch fixture ${fixtureName}: ${res.statusText}`);
+      }
+      const arrayBuf = await res.arrayBuffer();
+      const uint8 = new Uint8Array(arrayBuf);
+      const decoder = new TextDecoder('utf-8');
+      const text = decoder.decode(uint8);
+
+      await new Promise(resolve => term.write(text, resolve));
+      await new Promise(r => setTimeout(r, 80));
+    };
+
+    window.getGeometry = function() {
+      if (!window._currentSession) return null;
+      const term = window._currentSession.term;
+      const container = document.querySelector('.terminal-container');
+      const xterm = container ? container.querySelector('.xterm') : null;
+      const screen = container ? container.querySelector('.xterm-screen') : null;
+      const rowsEl = container ? container.querySelector('.xterm-rows') : null;
+
+      const containerRect = container ? container.getBoundingClientRect() : null;
+      const screenRect = screen ? screen.getBoundingClientRect() : null;
+
+      let lastRowRect = null;
+      if (rowsEl && rowsEl.children.length > 0) {
+        const lastChild = rowsEl.children[rowsEl.children.length - 1];
+        lastRowRect = lastChild ? lastChild.getBoundingClientRect() : null;
+      }
+
+      const dimensions = term._core?._renderService?.dimensions;
+      const cellW = dimensions?.css?.cell?.width || 0;
+      const cellH = dimensions?.css?.cell?.height || 0;
+
+      const containerStyle = window.getComputedStyle(container);
+      const xtermStyle = xterm ? window.getComputedStyle(xterm) : null;
+
+      const padX = xtermStyle
+        ? parseFloat(xtermStyle.paddingLeft || 0) + parseFloat(xtermStyle.paddingRight || 0)
+        : 12;
+      const padY = xtermStyle
+        ? parseFloat(xtermStyle.paddingTop || 0) + parseFloat(xtermStyle.paddingBottom || 0)
+        : 8;
+
+      const scrollbarWidth = 0 === term.options.scrollback ? 0 : (term.options.overviewRuler?.width || 14);
+
+      return {
+        cols: term.cols,
+        rows: term.rows,
+        cellW,
+        cellH,
+        padX,
+        padY,
+        scrollbarWidth,
+        containerWidth: container.clientWidth,
+        containerHeight: container.clientHeight,
+        containerRect: containerRect ? {
+          left: containerRect.left,
+          top: containerRect.top,
+          right: containerRect.right,
+          bottom: containerRect.bottom,
+          width: containerRect.width,
+          height: containerRect.height,
+        } : null,
+        screenRect: screenRect ? {
+          left: screenRect.left,
+          top: screenRect.top,
+          right: screenRect.right,
+          bottom: screenRect.bottom,
+          width: screenRect.width,
+          height: screenRect.height,
+        } : null,
+        lastRowRect: lastRowRect ? {
+          left: lastRowRect.left,
+          top: lastRowRect.top,
+          right: lastRowRect.right,
+          bottom: lastRowRect.bottom,
+        } : null,
+      };
+    };
+
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

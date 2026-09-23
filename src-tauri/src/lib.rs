@@ -1,29 +1,26 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 pub mod config;
+pub mod pty_stream;
 
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     child_pid: Option<u32>,
+    recorder: Option<pty_stream::SessionRecorder>,
 }
 
 #[derive(Default)]
 pub struct PtyState {
     sessions: Mutex<HashMap<String, PtySession>>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct PtyOutputPayload {
-    pub id: String,
-    pub data: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -60,28 +57,26 @@ fn read_dir(path: String) -> Result<Vec<FileEntry>, String> {
     let read_entries = fs::read_dir(&dir)
         .map_err(|e| format!("Failed to read directory '{}': {}", path, e))?;
 
-    for entry in read_entries {
-        if let Ok(entry) = entry {
-            let p = entry.path();
-            let metadata = entry.metadata().ok();
-            let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
-            let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
-            let name = entry.file_name().to_string_lossy().to_string();
+    for entry in read_entries.flatten() {
+        let p = entry.path();
+        let metadata = entry.metadata().ok();
+        let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+        let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+        let name = entry.file_name().to_string_lossy().to_string();
 
-            if name.starts_with('.') && name != ".md" {
-                continue;
-            }
-            if name == "target" || name == "node_modules" || name == "dist" {
-                continue;
-            }
-
-            entries.push(FileEntry {
-                name,
-                path: p.to_string_lossy().to_string(),
-                is_dir,
-                size,
-            });
+        if name.starts_with('.') && name != ".md" {
+            continue;
         }
+        if name == "target" || name == "node_modules" || name == "dist" {
+            continue;
+        }
+
+        entries.push(FileEntry {
+            name,
+            path: p.to_string_lossy().to_string(),
+            is_dir,
+            size,
+        });
     }
 
     entries.sort_by(|a, b| {
@@ -247,6 +242,7 @@ fn pty_spawn(
     session_id: Option<String>,
     cols: u16,
     rows: u16,
+    on_output: Channel<InvokeResponseBody>,
 ) -> Result<String, String> {
     let id = session_id.unwrap_or_else(|| "1".to_string());
     let pty_system = native_pty_system();
@@ -261,22 +257,10 @@ fn pty_spawn(
 
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
     let mut cmd = CommandBuilder::new(&shell);
-    cmd.env("TERM", "xterm-256color");
-    cmd.env("COLORTERM", "truecolor");
-    cmd.env("MDTERM", "1");
-    cmd.env("TERM_PROGRAM", "mdterm");
-    if std::env::var("LANG").is_err() {
-        cmd.env("LANG", "en_US.UTF-8");
-    }
 
-    let existing_path = std::env::var("PATH").unwrap_or_default();
-    let home_bin = dirs::home_dir()
-        .map(|h| h.join(".local/bin").to_string_lossy().to_string())
-        .unwrap_or_default();
-    let repo_bin = std::env::current_dir()
-        .map(|d| d.join("bin").to_string_lossy().to_string())
-        .unwrap_or_default();
-    cmd.env("PATH", format!("{}:{}:{}", repo_bin, home_bin, existing_path));
+    for (k, v) in pty_stream::shell_env() {
+        cmd.env(k, v);
+    }
 
     if let Ok(current_dir) = std::env::current_dir() {
         cmd.cwd(current_dir);
@@ -289,10 +273,16 @@ fn pty_spawn(
     // Drop slave in parent so EOF is triggered when shell exits
     drop(pair.slave);
 
-    let mut reader = pair.master.try_clone_reader()
+    let reader = pair.master.try_clone_reader()
         .map_err(|e| format!("Failed to clone reader: {}", e))?;
     let writer = pair.master.take_writer()
         .map_err(|e| format!("Failed to take writer: {}", e))?;
+
+    let recorder = pty_stream::SessionRecorder::new(&id);
+    if let Some(ref r) = recorder {
+        // Initial size at offset 0 so imported recordings replay at the right size.
+        r.record_resize(cols.max(1), rows.max(1));
+    }
 
     // Store in state
     {
@@ -303,6 +293,7 @@ fn pty_spawn(
                 master: pair.master,
                 writer,
                 child_pid,
+                recorder: recorder.clone(),
             },
         );
     }
@@ -310,25 +301,12 @@ fn pty_spawn(
     // Spawn reader thread
     let session_id_clone = id.clone();
     std::thread::spawn(move || {
-        let mut buffer = [0u8; 4096];
-        loop {
-            match reader.read(&mut buffer) {
-                Ok(0) => {
-                    break;
-                }
-                Ok(n) => {
-                    let text = String::from_utf8_lossy(&buffer[..n]).to_string();
-                    let _ = app.emit("pty-output", PtyOutputPayload {
-                        id: session_id_clone.clone(),
-                        data: text.clone(),
-                    });
-                    let _ = app.emit(&format!("pty-output-{}", session_id_clone), text);
-                }
-                Err(_) => {
-                    break;
-                }
+        let _ = pty_stream::pump(reader, 65536, |bytes| {
+            if let Some(ref r) = recorder {
+                let _ = r.record_bytes(bytes);
             }
-        }
+            let _ = on_output.send(InvokeResponseBody::Raw(bytes.to_vec()));
+        });
         let _ = app.emit("pty-exit", session_id_clone.clone());
         let _ = app.emit(&format!("pty-exit-{}", session_id_clone), ());
     });
@@ -399,7 +377,39 @@ fn pty_write(state: State<PtyState>, session_id: Option<String>, data: String) -
 }
 
 #[tauri::command]
-fn pty_resize(state: State<PtyState>, session_id: Option<String>, cols: u16, rows: u16) -> Result<(), String> {
+fn pty_write_bytes(
+    state: State<PtyState>,
+    session_id: Option<String>,
+    data: Vec<u8>,
+) -> Result<(), String> {
+    let mut sess = state.sessions.lock().map_err(|_| "Lock error".to_string())?;
+    let target = match session_id {
+        Some(ref id) => sess.get_mut(id),
+        None => sess.values_mut().next(),
+    };
+
+    if let Some(session) = target {
+        for chunk in data.chunks(4096) {
+            session.writer.write_all(chunk)
+                .map_err(|e| format!("Write error: {}", e))?;
+        }
+        session.writer.flush()
+            .map_err(|e| format!("Flush error: {}", e))?;
+        Ok(())
+    } else {
+        Err("No active PTY session".to_string())
+    }
+}
+
+#[tauri::command]
+fn pty_resize(
+    state: State<PtyState>,
+    session_id: Option<String>,
+    cols: u16,
+    rows: u16,
+    pixel_width: Option<u16>,
+    pixel_height: Option<u16>,
+) -> Result<(), String> {
     let sess = state.sessions.lock().map_err(|_| "Lock error".to_string())?;
     let target = match session_id {
         Some(ref id) => sess.get(id),
@@ -410,9 +420,12 @@ fn pty_resize(state: State<PtyState>, session_id: Option<String>, cols: u16, row
         session.master.resize(PtySize {
             rows: rows.max(1),
             cols: cols.max(1),
-            pixel_width: 0,
-            pixel_height: 0,
+            pixel_width: pixel_width.unwrap_or(0),
+            pixel_height: pixel_height.unwrap_or(0),
         }).map_err(|e| format!("Resize error: {}", e))?;
+        if let Some(ref recorder) = session.recorder {
+            let _ = recorder.record_resize(cols, rows);
+        }
         Ok(())
     } else {
         Err("No active PTY session".to_string())
@@ -496,6 +509,7 @@ pub fn run() {
             pty_spawn,
             pty_get_cwd,
             pty_write,
+            pty_write_bytes,
             pty_resize,
             pty_close,
             get_cli_file,

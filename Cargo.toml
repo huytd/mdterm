@@ -2,5 +2,6 @@
 members = [
     "frontend",
     "src-tauri",
+    "tools/term-rec",
 ]
 resolver = "2"

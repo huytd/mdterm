@@ -1,0 +1,6 @@
+[H[2J=== Powerline Glyphs Test ===
+U+E0B0 (solid right):    [44;37m user@host [42;34m[42;30m /path/to/repo [49;32m[0m
+U+E0B1 (thin right):     [44;37m section A [37;44m[37;44m section B [0m
+U+E0B2 (solid left):     [49;35m[45;37m branch:main [45;36m[46;30m utf8 [0m
+U+E0B3 (thin left):      [46;30m col 1 [30;46m[30;46m ln 42 [0m
+All four together:    

@@ -9,6 +9,55 @@ on:
   workflow_dispatch:
 
 jobs:
+  test:
+    name: Test Harness (L1, L2, L3)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            tmux
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run L1 Rust tests
+        run: cargo test -p mdterm
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run L2 Headless replay tests
+        run: |
+          cd tests/terminal
+          npm ci
+          npm test
+
+      - name: Install Playwright WebKit
+        run: |
+          cd tests/terminal
+          npx playwright install --with-deps webkit
+
+      - name: Run L3 Visual & Geometry tests
+        continue-on-error: true
+        run: |
+          cd tests/terminal
+          npm run test:visual
+
   build-ubuntu:
     name: Build Linux (Ubuntu)
     runs-on: ubuntu-22.04

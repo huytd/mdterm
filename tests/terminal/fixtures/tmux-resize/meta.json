@@ -1,0 +1,15 @@
+{
+  "cols": 80,
+  "rows": 24,
+  "command": "/bin/bash /home/king/code/mdterm/tests/terminal/scenarios/tmux-resize.sh",
+  "tmux": true,
+  "xtermVersion": "6.0.0",
+  "events": [
+    {
+      "type": "resize",
+      "offset": 1290,
+      "cols": 100,
+      "rows": 30
+    }
+  ]
+}

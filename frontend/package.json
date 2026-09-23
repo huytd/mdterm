@@ -1,0 +1,5 @@
+{
+  "name": "mdterm-frontend",
+  "private": true,
+  "type": "module"
+}

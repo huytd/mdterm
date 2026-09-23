@@ -1,0 +1,8 @@
+{
+  "cols": 80,
+  "rows": 24,
+  "command": "/bin/bash /home/king/code/mdterm/tests/terminal/scenarios/powerline.sh",
+  "tmux": false,
+  "xtermVersion": "6.0.0",
+  "events": []
+}
