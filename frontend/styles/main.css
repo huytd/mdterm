@@ -1321,3 +1321,108 @@ kbd, code {
   color: var(--success);
   font-weight: bold;
 }
+
+/* tmux control mode: one xterm per tmux pane, positioned from tmux's layout */
+.tmux-window {
+  position: absolute;
+  inset: 4px 6px;
+  overflow: hidden;
+}
+
+.tmux-pane {
+  position: absolute;
+  overflow: hidden;
+  transition: opacity 120ms ease;
+}
+
+.terminal-container .tmux-pane .xterm {
+  padding: 0;
+  height: 100%;
+  width: 100%;
+}
+
+.tmux-pane.tmux-pane-inactive {
+  opacity: 0.72;
+}
+
+.tmux-divider {
+  position: absolute;
+  z-index: 2;
+}
+
+.tmux-divider::after {
+  content: '';
+  position: absolute;
+  background-color: var(--border-color);
+}
+
+.tmux-divider-v {
+  cursor: col-resize;
+}
+
+.tmux-divider-v::after {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+}
+
+.tmux-divider-h {
+  cursor: row-resize;
+}
+
+.tmux-divider-h::after {
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+}
+
+.tmux-divider:hover::after {
+  background-color: var(--accent);
+}
+
+body.tmux-dragging-v,
+body.tmux-dragging-v * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
+body.tmux-dragging-h,
+body.tmux-dragging-h * {
+  cursor: row-resize !important;
+  user-select: none;
+}
+
+.tmux-measure {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 400px;
+  height: 200px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tab-tmux-badge {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 4px;
+  margin-right: 4px;
+  border-radius: 3px;
+  color: var(--accent);
+  border: 1px solid currentColor;
+  opacity: 0.8;
+}
+
+.tmux-prompt-intro {
+  margin: 0 0 12px;
+  opacity: 0.85;
+}
+
+.tmux-prompt-version {
+  opacity: 0.6;
+  font-size: 0.9em;
+}

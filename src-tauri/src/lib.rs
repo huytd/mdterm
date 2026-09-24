@@ -3,19 +3,41 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 pub mod config;
 pub mod pty_stream;
+pub mod tmux;
 
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    writer: tmux::SharedWriter,
     child_pid: Option<u32>,
     recorder: Option<pty_stream::SessionRecorder>,
+    /// Set while `tmux -CC` runs in this PTY: the stream is control protocol,
+    /// so user keystrokes must not reach it (Esc/q detaches instead).
+    tmux_control: Arc<AtomicBool>,
+}
+
+impl PtySession {
+    fn write_input(&self, bytes: &[u8]) -> Result<(), String> {
+        let mut writer = self.writer.lock().map_err(|_| "Writer lock error".to_string())?;
+        if self.tmux_control.load(Ordering::SeqCst) {
+            if bytes == b"\x1b" || bytes == b"q" || bytes == b"\x03" {
+                writer.write_all(b"detach-client\n").map_err(|e| format!("Write error: {}", e))?;
+                return writer.flush().map_err(|e| format!("Flush error: {}", e));
+            }
+            return Ok(());
+        }
+        for chunk in bytes.chunks(4096) {
+            writer.write_all(chunk).map_err(|e| format!("Write error: {}", e))?;
+        }
+        writer.flush().map_err(|e| format!("Flush error: {}", e))
+    }
 }
 
 #[derive(Default)]
@@ -275,8 +297,12 @@ fn pty_spawn(
 
     let reader = pair.master.try_clone_reader()
         .map_err(|e| format!("Failed to clone reader: {}", e))?;
-    let writer = pair.master.take_writer()
-        .map_err(|e| format!("Failed to take writer: {}", e))?;
+    let writer: tmux::SharedWriter = Arc::new(Mutex::new(
+        pair.master.take_writer()
+            .map_err(|e| format!("Failed to take writer: {}", e))?,
+    ));
+    let tmux_control = Arc::new(AtomicBool::new(false));
+    let mut inband = tmux::InbandTracker::new(id.clone(), writer.clone(), tmux_control.clone());
 
     let recorder = pty_stream::SessionRecorder::new(&id);
     if let Some(ref r) = recorder {
@@ -294,19 +320,25 @@ fn pty_spawn(
                 writer,
                 child_pid,
                 recorder: recorder.clone(),
+                tmux_control,
             },
         );
     }
 
     // Spawn reader thread
     let session_id_clone = id.clone();
+    let app_for_reader = app.clone();
     std::thread::spawn(move || {
         let _ = pty_stream::pump(reader, 65536, |bytes| {
             if let Some(ref r) = recorder {
                 let _ = r.record_bytes(bytes);
             }
-            let _ = on_output.send(InvokeResponseBody::Raw(bytes.to_vec()));
+            let term_bytes = inband.process(&app_for_reader, bytes);
+            if !term_bytes.is_empty() {
+                let _ = on_output.send(InvokeResponseBody::Raw(term_bytes));
+            }
         });
+        inband.close(&app_for_reader);
         let _ = app.emit("pty-exit", session_id_clone.clone());
         let _ = app.emit(&format!("pty-exit-{}", session_id_clone), ());
     });
@@ -315,7 +347,11 @@ fn pty_spawn(
 }
 
 #[tauri::command]
-fn pty_get_cwd(state: State<PtyState>, session_id: Option<String>) -> Result<String, String> {
+fn pty_get_cwd(
+    state: State<PtyState>,
+    tmux_state: State<tmux::TmuxState>,
+    session_id: Option<String>,
+) -> Result<String, String> {
     let sess = state.sessions.lock().map_err(|_| "Lock error".to_string())?;
     let target = session_id
         .as_ref()
@@ -325,11 +361,19 @@ fn pty_get_cwd(state: State<PtyState>, session_id: Option<String>) -> Result<Str
     if let Some(session) = target {
         if let Some(pid) = session.child_pid {
             let _ = pid;
-            // Check tmux pane_current_path if tmux is running
-            if let Ok(out) = std::process::Command::new("tmux")
-                .args(["display-message", "-p", "#{pane_current_path}"])
-                .output()
-            {
+            // Check tmux pane_current_path if tmux is running. Skipped while a
+            // control-mode client is attached: out-of-band tmux commands have
+            // crashed tmux servers with control clients (3.3a/3.5a); the
+            // frontend asks tmux in-band for pane cwds instead.
+            let tmux_out = if tmux_state.has_connections() {
+                None
+            } else {
+                std::process::Command::new("tmux")
+                    .args(["display-message", "-p", "#{pane_current_path}"])
+                    .output()
+                    .ok()
+            };
+            if let Some(out) = tmux_out {
                 if out.status.success() {
                     let tmux_path = String::from_utf8_lossy(&out.stdout).trim().to_string();
                     if !tmux_path.is_empty() && std::path::Path::new(&tmux_path).is_dir() {
@@ -363,14 +407,7 @@ fn pty_write(state: State<PtyState>, session_id: Option<String>, data: String) -
     };
 
     if let Some(session) = target {
-        let bytes = data.as_bytes();
-        for chunk in bytes.chunks(4096) {
-            session.writer.write_all(chunk)
-                .map_err(|e| format!("Write error: {}", e))?;
-        }
-        session.writer.flush()
-            .map_err(|e| format!("Flush error: {}", e))?;
-        Ok(())
+        session.write_input(data.as_bytes())
     } else {
         Err("No active PTY session".to_string())
     }
@@ -389,13 +426,7 @@ fn pty_write_bytes(
     };
 
     if let Some(session) = target {
-        for chunk in data.chunks(4096) {
-            session.writer.write_all(chunk)
-                .map_err(|e| format!("Write error: {}", e))?;
-        }
-        session.writer.flush()
-            .map_err(|e| format!("Flush error: {}", e))?;
-        Ok(())
+        session.write_input(&data)
     } else {
         Err("No active PTY session".to_string())
     }
@@ -495,6 +526,7 @@ pub fn run() {
             Ok(())
         })
         .manage(PtyState::default())
+        .manage(tmux::TmuxState::default())
         .invoke_handler(tauri::generate_handler![
             read_file,
             write_file,
@@ -512,6 +544,12 @@ pub fn run() {
             pty_write_bytes,
             pty_resize,
             pty_close,
+            tmux::tmux_detect,
+            tmux::tmux_attach,
+            tmux::tmux_subscribe,
+            tmux::tmux_command,
+            tmux::tmux_send_keys,
+            tmux::tmux_detach,
             get_cli_file,
             get_terminal_config,
             get_config_path,

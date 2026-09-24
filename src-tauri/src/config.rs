@@ -39,6 +39,24 @@ pub struct TerminalConfig {
     /// Terminal renderer: "dom" (default) or "webgl".
     #[serde(default)]
     pub renderer: Option<String>,
+
+    /// tmux control-mode integration settings.
+    #[serde(default)]
+    pub tmux: Option<TmuxConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct TmuxConfig {
+    /// "ask" (default), "auto" or "off": what to do at launch when tmux
+    /// sessions exist.
+    #[serde(default)]
+    pub integration: Option<String>,
+    /// Session to attach to; empty = most recently used.
+    #[serde(default)]
+    pub session: Option<String>,
+    /// Lines of history loaded into each pane on attach.
+    #[serde(default)]
+    pub scrollback: Option<u32>,
 }
 
 impl Default for TerminalConfig {
@@ -51,6 +69,7 @@ impl Default for TerminalConfig {
             font_size: Some(13.0),
             character_height: Some(1.0),
             renderer: Some("dom".to_string()),
+            tmux: None,
         }
     }
 }
@@ -116,6 +135,9 @@ pub struct RawConfigFile {
 
     #[serde(default)]
     pub terminal: Option<RawTerminalSection>,
+
+    #[serde(default)]
+    pub tmux: Option<TmuxConfig>,
 
     #[serde(default)]
     pub font: Option<RawFontSection>,
@@ -247,6 +269,7 @@ impl RawConfigFile {
             font_size,
             character_height,
             renderer,
+            tmux: self.tmux,
         }
     }
 }
@@ -312,6 +335,15 @@ character_height: 1.0
 
 # Terminal renderer: "dom" (default, most reliable) or "webgl" (faster, GPU-dependent)
 renderer: "dom"
+
+# tmux integration (control mode): mdterm draws tmux panes natively, tmux
+# windows become tabs. "ask" (default) offers to attach at launch when tmux
+# sessions exist, "auto" attaches without asking, "off" disables the prompt.
+# Running `tmux -CC attach` in any mdterm shell (also over ssh) always works.
+# tmux:
+#   integration: "ask"
+#   session: ""        # empty = most recently used session
+#   scrollback: 2000   # history lines loaded per pane on attach
 "##;
 
 pub fn ensure_default_config_exists() -> Result<PathBuf, String> {

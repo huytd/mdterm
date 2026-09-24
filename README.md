@@ -266,11 +266,45 @@ mdterm sets `TERM=xterm-256color` and `COLORTERM=truecolor`. For truecolor and f
 set -as terminal-features ',xterm-256color:RGB,sync'
 ```
 
+#### Native tmux integration (control mode)
+
+mdterm can drive tmux through its control mode (`tmux -CC`), the same protocol iTerm2 uses. tmux
+keeps running your sessions; mdterm draws them natively:
+
+* every tmux **pane** is its own terminal view, laid out exactly where tmux puts it, with
+  draggable dividers (drag → `resize-pane`) and click-to-focus;
+* every tmux **window** is an mdterm tab (marked `TMUX`);
+* scrollback, selection, copy/paste, file links and the `mdterm` editor command work per pane.
+
+Ways in:
+
+* **At launch** — if tmux sessions exist, mdterm offers to attach (`tmux.integration: ask`).
+  `auto` attaches without asking, `off` disables the prompt.
+* **From any shell, local or over ssh** — run `tmux -CC attach` (or `tmux -CC new`,
+  `ssh -t host tmux -CC attach`). mdterm detects control mode in the stream and opens the
+  windows as tabs; nothing needs installing on the remote host. The original tab shows a notice;
+  press `Esc` or `q` there to detach.
+
+```yaml
+# ~/.config/mdterm/config.yml
+tmux:
+  integration: "ask"   # ask | auto | off
+  session: ""          # attach target for "auto"; empty = most recent session
+  scrollback: 2000     # history lines loaded into each pane on attach
+```
+
+In control mode keystrokes go straight to the pane, so tmux's prefix key is not interpreted;
+use the shortcuts below (or tmux commands from a shell). Requires tmux 3.2 or newer
+(3.4+ recommended). Detaching leaves the tmux session running.
+
 ### Terminal rendering tests
 
 The terminal pipeline has a regression harness under `tests/terminal/` (see its README):
 Rust PTY stream tests, headless xterm.js replay of recorded fixtures (with tmux itself as the
-oracle for tmux scenarios), and Playwright/WebKit geometry and screenshot tests.
+oracle for tmux scenarios), and Playwright/WebKit geometry and screenshot tests. tmux control
+mode is covered by Rust tests against a real tmux (spawned and in-band `-CC` in a PTY) and by
+`visual/tmux.spec.mjs`, which drives the real frontend client against an isolated tmux server
+and compares every pane with `capture-pane`.
 
 ```bash
 just test-term          # cargo tests + headless replay
@@ -312,6 +346,14 @@ reproduce it, then `node tests/terminal/scripts/import-recording.mjs /tmp/mdterm
 | `/` | In WYSIWYG | Open Slash Command popup on any line |
 | `Tab` / `Shift + Tab` | In Editor | Indent / Outdent list item or insert spaces |
 | `Ctrl + F / B / A / E / ...` | In Terminal | Terminal Emacs readline navigation (forward, backward, line start/end) |
+| `Super + T` / `Ctrl + Shift + T` | tmux tab | New tmux window (opens as a tab) |
+| `Super + W` / `Ctrl + Shift + W` | tmux tab | Close the active tmux pane (tab close button kills the window) |
+| `Super + D` / `Ctrl + Shift + D` | tmux pane | Split right |
+| `Super + Shift + D` / `Ctrl + Shift + E` | tmux pane | Split down |
+| `Super + Alt + Arrows` / `Ctrl + Shift + Arrows` | tmux pane | Move focus to the pane in that direction |
+| `Super + [` / `Super + ]` | tmux pane | Previous / next pane |
+| `Super + Enter` / `Ctrl + Shift + Enter` | tmux pane | Zoom / unzoom pane |
+| `Super + Alt + D` / `Ctrl + Shift + Alt + D` | tmux pane | Detach from tmux |
 
 ---
 

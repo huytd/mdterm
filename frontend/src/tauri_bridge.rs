@@ -701,3 +701,60 @@ pub fn get_cursor_pos() -> (f64, f64) {
     let y = arr.get(1).as_f64().unwrap_or(150.0);
     (x, y)
 }
+
+#[wasm_bindgen(module = "/js/tmux-client.js")]
+extern "C" {
+    #[wasm_bindgen(js_name = tmuxAction)]
+    pub fn tmux_action(session_id: &str, action: &str);
+
+    #[wasm_bindgen(js_name = tmuxDetect)]
+    async fn tmux_detect_js() -> wasm_bindgen::JsValue;
+
+    #[wasm_bindgen(js_name = tmuxAttach, catch)]
+    async fn tmux_attach_js(session: Option<String>, create: bool) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue>;
+}
+
+/// Session ids of tabs that show a tmux window (`tmux-<conn>-<window>`).
+pub fn is_tmux_session(session_id: &str) -> bool {
+    session_id.starts_with("tmux-")
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Default)]
+pub struct TmuxSessionInfo {
+    pub name: String,
+    #[serde(default)]
+    pub windows: u32,
+    #[serde(default)]
+    pub attached: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Default)]
+pub struct TmuxDetectInfo {
+    #[serde(default)]
+    pub installed: bool,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub supported: bool,
+    #[serde(default)]
+    pub sessions: Vec<TmuxSessionInfo>,
+    #[serde(default)]
+    pub integration: String,
+    #[serde(default)]
+    pub session: String,
+}
+
+pub async fn tmux_detect() -> Option<TmuxDetectInfo> {
+    let val = tmux_detect_js().await;
+    if val.is_null() || val.is_undefined() {
+        return None;
+    }
+    serde_wasm_bindgen::from_value(val).ok()
+}
+
+pub async fn tmux_attach(session: Option<String>, create: bool) -> Result<(), String> {
+    tmux_attach_js(session, create)
+        .await
+        .map(|_| ())
+        .map_err(|e| e.as_string().unwrap_or_else(|| format!("{:?}", e)))
+}

@@ -49,6 +49,8 @@ pub fn TitleBar(
                             let is_dirty_val = tab.is_dirty;
                             let is_editor = tab.is_editor_open;
                             let active_filename = tab.active_filename;
+                            let tab_title = tab.title;
+                            let is_tmux = crate::tauri_bridge::is_tmux_session(&tab.session_id.get());
 
                             let tab_index = Memo::new({
                                 let tid = tid.clone();
@@ -63,16 +65,19 @@ pub fn TitleBar(
                             let display_title = move || {
                                 if is_editor.get() {
                                     active_filename.get()
+                                } else if is_tmux {
+                                    tab_title.get()
                                 } else {
                                     format!("Terminal {}", tab_index.get() + 1)
                                 }
                             };
 
                             let tab_class = move || {
-                                if is_active.get() {
-                                    "titlebar-tab active"
-                                } else {
-                                    "titlebar-tab"
+                                match (is_active.get(), is_tmux) {
+                                    (true, true) => "titlebar-tab active tmux-tab",
+                                    (true, false) => "titlebar-tab active",
+                                    (false, true) => "titlebar-tab tmux-tab",
+                                    (false, false) => "titlebar-tab",
                                 }
                             };
 
@@ -105,6 +110,9 @@ pub fn TitleBar(
                                         }
                                     }}
 
+                                    {is_tmux.then(|| view! {
+                                        <span class="tab-tmux-badge" title="tmux window (control mode)">"tmux"</span>
+                                    })}
                                     <span class="tab-title-text">{display_title}</span>
 
                                     {move || {
