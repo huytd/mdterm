@@ -5,7 +5,7 @@ use web_sys::{KeyboardEvent, MouseEvent};
 use crate::components::samples::WELCOME_MD;
 use crate::components::{
     DocumentPreview, EditorHeader, FloatingControls, Modals, SourceEditor, SplitEditor,
-    TerminalPane, TitleBar, WindowResizeHandles, WysiwygEditor,
+    TerminalPane, TitleBar, TmuxPrompt, WindowResizeHandles, WysiwygEditor,
 };
 use crate::html::{self, HtmlEnvelope};
 use crate::markdown::{html_to_markdown, markdown_to_html};
@@ -14,8 +14,27 @@ use crate::state::{
 };
 use crate::tauri_bridge::{
     self, close_terminal_session, exec_editor_cmd, fit_terminal_session, focus_terminal_session,
-    set_terminal_theme, window_find,
+    is_tmux_session, set_terminal_theme, tmux_action, window_find, TmuxDetectInfo,
 };
+
+fn detail_str(detail: &wasm_bindgen::JsValue, key: &str) -> Option<String> {
+    js_sys::Reflect::get(detail, &key.into()).ok().and_then(|v| v.as_string())
+}
+
+fn detail_bool(detail: &wasm_bindgen::JsValue, key: &str) -> bool {
+    js_sys::Reflect::get(detail, &key.into()).ok().and_then(|v| v.as_bool()).unwrap_or(false)
+}
+
+/// Registers a window-level CustomEvent listener for the lifetime of the app.
+fn on_window_event(name: &str, handler: impl Fn(wasm_bindgen::JsValue) + 'static) {
+    if let Some(win) = web_sys::window() {
+        let cb = wasm_bindgen::closure::Closure::wrap(Box::new(move |ev: web_sys::CustomEvent| {
+            handler(ev.detail());
+        }) as Box<dyn FnMut(web_sys::CustomEvent)>);
+        let _ = win.add_event_listener_with_callback(name, cb.as_ref().unchecked_ref());
+        cb.forget();
+    }
+}
 
 const THEME_STORAGE_KEY: &str = "mdterm_theme";
 
@@ -55,6 +74,9 @@ pub fn App() -> impl IntoView {
 
     // Modals and menus
     let active_modal = RwSignal::new(ActiveModal::None);
+    let tmux_prompt = RwSignal::new(None::<TmuxDetectInfo>);
+    // Tab to drop once a launch-time tmux attach has produced its first window.
+    let replace_tab_on_attach = RwSignal::new(None::<String>);
     let find_replace = RwSignal::new(FindReplaceState::default());
     let slash_menu = RwSignal::new(SlashMenuState::default());
 
@@ -79,7 +101,7 @@ pub fn App() -> impl IntoView {
     });
 
     // Tab creation callback
-    let create_new_tab = Callback::new(move |_| {
+    let create_shell_tab = Callback::new(move |_: ()| {
         let counter = next_tab_counter.get();
         next_tab_counter.set(counter + 1);
         let new_id = format!("{}", counter);
@@ -99,8 +121,22 @@ pub fn App() -> impl IntoView {
         });
     });
 
-    // Tab closing callback
-    let close_tab_by_id = Callback::new(move |target_id: String| {
+    // New tab: on a tmux tab this opens a new tmux window (its tab appears when
+    // tmux reports it); elsewhere a new shell.
+    let create_new_tab = Callback::new(move |_: ()| {
+        if let Some(tab) = get_active_tab() {
+            let sid = tab.session_id.get();
+            if is_tmux_session(&sid) {
+                tmux_action(&sid, "new-window");
+                return;
+            }
+        }
+        create_shell_tab.run(());
+    });
+
+    // Tab removal (no questions asked; tmux tabs arrive here once tmux has
+    // closed the window).
+    let remove_tab_by_id = Callback::new(move |target_id: String| {
         let list = tabs.get();
         if list.len() <= 1 {
             return;
@@ -145,6 +181,109 @@ pub fn App() -> impl IntoView {
                     fit_terminal_session(Some(&next_target));
                 });
             }
+        }
+    });
+
+    // Closing a tmux tab kills the tmux window; tmux's %window-close then
+    // removes the tab.
+    let close_tab_by_id = Callback::new(move |target_id: String| {
+        if let Some(tab) = tabs.get().into_iter().find(|t| t.id.get() == target_id) {
+            let sid = tab.session_id.get();
+            if is_tmux_session(&sid) {
+                tmux_action(&sid, "kill-window");
+                return;
+            }
+        }
+        remove_tab_by_id.run(target_id);
+    });
+
+    // tmux windows <-> tabs
+    on_window_event("mdterm-tmux-window-add", move |detail| {
+        let Some(sid) = detail_str(&detail, "session_id") else { return };
+        if tabs.get().iter().any(|t| t.session_id.get() == sid) {
+            return;
+        }
+        let name = detail_str(&detail, "name").unwrap_or_else(|| "tmux".to_string());
+        tabs.update(|list| list.push(WorkspaceTab::new(sid.clone(), sid.clone(), name, None)));
+        if detail_bool(&detail, "activate") || tabs.get().len() == 1 {
+            select_tab_by_id.run(sid.clone());
+        }
+        if let Some(old) = replace_tab_on_attach.get() {
+            replace_tab_on_attach.set(None);
+            let pristine = tabs
+                .get()
+                .iter()
+                .find(|t| t.id.get() == old)
+                .is_some_and(|t| !t.is_editor_open.get());
+            if pristine {
+                select_tab_by_id.run(sid);
+                remove_tab_by_id.run(old);
+            }
+        }
+    });
+
+    on_window_event("mdterm-tmux-window-close", move |detail| {
+        let Some(sid) = detail_str(&detail, "session_id") else { return };
+        let Some(tab) = tabs.get().into_iter().find(|t| t.session_id.get() == sid) else { return };
+        if tabs.get().len() <= 1 {
+            create_shell_tab.run(());
+        }
+        remove_tab_by_id.run(tab.id.get());
+    });
+
+    on_window_event("mdterm-tmux-window-renamed", move |detail| {
+        let (Some(sid), Some(name)) = (detail_str(&detail, "session_id"), detail_str(&detail, "name")) else { return };
+        if let Some(tab) = tabs.get().into_iter().find(|t| t.session_id.get() == sid) {
+            tab.title.set(name);
+        }
+    });
+
+    on_window_event("mdterm-tmux-window-select", move |detail| {
+        let Some(sid) = detail_str(&detail, "session_id") else { return };
+        if let Some(tab) = tabs.get().into_iter().find(|t| t.session_id.get() == sid) {
+            select_tab_by_id.run(tab.id.get());
+        }
+    });
+
+    on_window_event("mdterm-tmux-exit", move |detail| {
+        // Return focus to the shell that ran `tmux -CC`, if any.
+        if let Some(origin) = detail_str(&detail, "origin") {
+            if let Some(tab) = tabs.get().into_iter().find(|t| t.session_id.get() == origin) {
+                select_tab_by_id.run(tab.id.get());
+            }
+        }
+    });
+
+    let attach_tmux = Callback::new(move |(session, create): (Option<String>, bool)| {
+        let only_initial = tabs.get().len() == 1 && !is_tmux_session(&tabs.get()[0].session_id.get());
+        if only_initial {
+            replace_tab_on_attach.set(Some(tabs.get()[0].id.get()));
+        }
+        leptos::task::spawn_local(async move {
+            if let Err(e) = tauri_bridge::tmux_attach(session, create).await {
+                replace_tab_on_attach.set(None);
+                tauri_bridge::show_toast(&format!("tmux: {}", e));
+            }
+        });
+    });
+
+    // Offer (or perform) a control-mode attach when tmux sessions exist at launch.
+    leptos::task::spawn_local(async move {
+        let Some(info) = tauri_bridge::tmux_detect().await else { return };
+        if !info.installed || !info.supported || info.sessions.is_empty() {
+            return;
+        }
+        match info.integration.as_str() {
+            "off" => {}
+            "auto" => {
+                let target = if info.session.is_empty() {
+                    info.sessions.first().map(|s| s.name.clone())
+                } else {
+                    Some(info.session.clone())
+                };
+                attach_tmux.run((target, !info.session.is_empty()));
+            }
+            _ => tmux_prompt.set(Some(info)),
         }
     });
 
@@ -788,8 +927,11 @@ pub fn App() -> impl IntoView {
             ev.prevent_default();
             ev.stop_propagation();
             if let Some(active_tab) = get_active_tab() {
+                let sid = active_tab.session_id.get();
                 if active_tab.is_editor_open.get() {
                     handle_close_editor.run(());
+                } else if is_tmux_session(&sid) {
+                    tmux_action(&sid, "kill-pane");
                 } else if tabs.get().len() > 1 {
                     close_tab_by_id.run(active_tab.id.get());
                 } else {
@@ -1136,6 +1278,8 @@ pub fn App() -> impl IntoView {
                 on_replace_all=handle_replace_all
                 on_slash_select=handle_slash_select
             />
+
+            <TmuxPrompt info=tmux_prompt on_attach=attach_tmux />
 
             <WindowResizeHandles is_maximized=is_maximized.into() />
         </div>

@@ -3,6 +3,11 @@
  * Core terminal module for mdterm (Tauri 2 + xterm.js 6.x)
  */
 
+import {
+  isTmuxSessionId, mountTmuxWindow, focusTmuxWindow, fitTmuxWindow, unmountTmuxWindow,
+  tmuxApplyConfig, tmuxSetTheme
+} from './tmux-client.js';
+
 export const TERMINAL_THEMES = {
   dark: {
     background: '#0f141c',
@@ -546,118 +551,13 @@ export async function createTerminal(container, cfg = {}, opts = {}) {
   };
 }
 
-export async function initTerminalSession(containerId, sessionId) {
-  const sId = sessionId || '1';
-  if (typeof window !== 'undefined') {
-    window._mdtermSessions = window._mdtermSessions || {};
-    window._mdtermActiveSessionId = sId;
-  }
-
-  const container = document.getElementById(containerId);
-  if (!container) return;
-
-  if (window._mdtermSessions[sId] && window._mdtermSessions[sId].container === container && window._mdtermSessions[sId].term) {
-    const existing = window._mdtermSessions[sId];
-    window._mdtermTerminal = existing.term;
-    window._mdtermFitAddon = existing.fitAddon;
-    if (typeof existing.scheduleResize === 'function') {
-      existing.scheduleResize();
-    } else if (existing.fitAddon) {
-      try { existing.fitAddon.fit(); } catch (e) {}
-    }
-    return;
-  }
-
-  if (window._mdtermSessions[sId]) {
-    try {
-      const prev = window._mdtermSessions[sId];
-      if (typeof prev.unlistenExit === 'function') prev.unlistenExit();
-      if (prev.ro) prev.ro.disconnect();
-      if (typeof prev.dispose === 'function') {
-        prev.dispose();
-      } else if (prev.term) {
-        prev.term.dispose();
-      }
-    } catch (e) {}
-    delete window._mdtermSessions[sId];
-  }
-  container.innerHTML = '';
-
-  const tauriInvokeFn = getTauriInvoke();
-  const hasTauri = typeof tauriInvokeFn === 'function';
-
-  if (hasTauri && !window._mdtermTerminalConfig) {
-    try {
-      if (window._mdtermTerminalConfigPromise) {
-        const loadedCfg = await window._mdtermTerminalConfigPromise;
-        if (loadedCfg) {
-          window._mdtermTerminalConfig = loadedCfg;
-        }
-      } else {
-        const loadedCfg = await tauriInvokeFn('get_terminal_config');
-        if (loadedCfg) {
-          window._mdtermTerminalConfig = loadedCfg;
-        }
-      }
-    } catch (e) {
-      console.error('Failed to get terminal config on startup:', e);
-    }
-  }
-
-  const cfg = window._mdtermTerminalConfig || {};
-
-  const defaultFontFamily = '"JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace';
-  const rawFont = cfg.font_family || cfg.fontFamily;
-  const fontFamily = rawFont ? normalizeFontFamily(rawFont) : defaultFontFamily;
-  document.documentElement.style.setProperty('--font-mono', fontFamily);
-
-  const sessionObj = {
-    id: sId,
-    container,
-    cwd: '',
-    ro: null
-  };
-
-  const opts = {
-    onResize(cols, rows, pixelWidth, pixelHeight) {
-      if (hasTauri) {
-        // Resizes sent before pty_spawn resolves would hit "No active PTY
-        // session" and leave the PTY at a stale size, so chain them on spawn.
-        (sessionObj.ptyReady || Promise.resolve()).then(() => tauriInvokeFn('pty_resize', {
-          sessionId: sId,
-          cols,
-          rows,
-          pixelWidth,
-          pixelHeight
-        })).catch(() => {});
-      }
-    }
-  };
-
-  let termResult;
-  try {
-    termResult = await createTerminal(container, cfg, opts);
-  } catch (err) {
-    const errDiv = document.createElement('div');
-    errDiv.style.color = '#ef4444';
-    errDiv.style.padding = '20px';
-    errDiv.innerText = err.message || 'Failed to initialize terminal.';
-    container.appendChild(errDiv);
-    return;
-  }
-
-  const { term, fitAddon, dispose, scheduleResize } = termResult;
-  sessionObj.term = term;
-  sessionObj.fitAddon = fitAddon;
-  sessionObj.dispose = dispose;
-  sessionObj.scheduleResize = scheduleResize;
-
-  window._mdtermTerminal = term;
-  window._mdtermFitAddon = fitAddon;
-  window._mdtermSessions[sId] = sessionObj;
-
-  windowShow();
-
+/**
+ * Wires clipboard, paste, app shortcuts, OSC handlers (editor open/save, OSC 52,
+ * OSC 7 cwd) and file links into an xterm instance. Shared by plain PTY tabs
+ * and tmux panes; `ctx.getCwd` / `ctx.sendInput` abstract the backend.
+ */
+export function installTerminalIntegration(term, container, ctx) {
+  const { sId, sessionObj, hasTauri, tauriInvokeFn, getCwd, sendInput, handleKey } = ctx;
   const writeClipboardText = async (text) => {
     if (hasTauri) {
       await tauriInvokeFn('plugin:clipboard-manager|write_text', { text });
@@ -717,6 +617,12 @@ export async function initTerminalSession(containerId, sessionId) {
   const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || '');
   term.attachCustomKeyEventHandler((event) => {
     if (event.type !== 'keydown') return true;
+
+    if (typeof handleKey === 'function' && handleKey(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+      return false;
+    }
 
     const key = event.key.toLowerCase();
     const isSuper = !!(event.metaKey || (typeof event.getModifierState === 'function' && (
@@ -982,7 +888,7 @@ export async function initTerminalSession(containerId, sessionId) {
                   if (!cleanPath.startsWith('/') && !cleanPath.startsWith('~')) {
                     let cwd = sessionObj.cwd || '';
                     if (!cwd) {
-                      cwd = await tauriInvokeFn('pty_get_cwd', { sessionId: sId }).catch(() => '');
+                      cwd = await getCwd().catch(() => '');
                     }
                     if (cwd) {
                       resolvedPath = cwd.replace(/\/+$/, '') + '/' + cleanPath;
@@ -1004,7 +910,7 @@ export async function initTerminalSession(containerId, sessionId) {
 
                 showToast("Opening '" + filename + "' (" + side + ")...");
                 const flag = isSuper ? '--left ' : '';
-                tauriInvokeFn('pty_write', { sessionId: sId, data: 'mdterm ' + flag + '"' + cleanPath + '"\n' }).catch(() => {});
+                Promise.resolve(sendInput('mdterm ' + flag + '"' + cleanPath + '"\n')).catch(() => {});
               } else {
                 showToast("Opened '" + filename + "' (" + side + ")");
                 const isHtml = /\.(html|htm|xhtml)$/i.test(filename);
@@ -1025,6 +931,134 @@ export async function initTerminalSession(containerId, sessionId) {
       }
     });
   }
+
+}
+
+export async function initTerminalSession(containerId, sessionId) {
+  const sId = sessionId || '1';
+  if (isTmuxSessionId(sId)) {
+    const tmuxContainer = document.getElementById(containerId);
+    if (tmuxContainer) mountTmuxWindow(tmuxContainer, sId);
+    return;
+  }
+  if (typeof window !== 'undefined') {
+    window._mdtermSessions = window._mdtermSessions || {};
+    window._mdtermActiveSessionId = sId;
+  }
+
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  if (window._mdtermSessions[sId] && window._mdtermSessions[sId].container === container && window._mdtermSessions[sId].term) {
+    const existing = window._mdtermSessions[sId];
+    window._mdtermTerminal = existing.term;
+    window._mdtermFitAddon = existing.fitAddon;
+    if (typeof existing.scheduleResize === 'function') {
+      existing.scheduleResize();
+    } else if (existing.fitAddon) {
+      try { existing.fitAddon.fit(); } catch (e) {}
+    }
+    return;
+  }
+
+  if (window._mdtermSessions[sId]) {
+    try {
+      const prev = window._mdtermSessions[sId];
+      if (typeof prev.unlistenExit === 'function') prev.unlistenExit();
+      if (prev.ro) prev.ro.disconnect();
+      if (typeof prev.dispose === 'function') {
+        prev.dispose();
+      } else if (prev.term) {
+        prev.term.dispose();
+      }
+    } catch (e) {}
+    delete window._mdtermSessions[sId];
+  }
+  container.innerHTML = '';
+
+  const tauriInvokeFn = getTauriInvoke();
+  const hasTauri = typeof tauriInvokeFn === 'function';
+
+  if (hasTauri && !window._mdtermTerminalConfig) {
+    try {
+      if (window._mdtermTerminalConfigPromise) {
+        const loadedCfg = await window._mdtermTerminalConfigPromise;
+        if (loadedCfg) {
+          window._mdtermTerminalConfig = loadedCfg;
+        }
+      } else {
+        const loadedCfg = await tauriInvokeFn('get_terminal_config');
+        if (loadedCfg) {
+          window._mdtermTerminalConfig = loadedCfg;
+        }
+      }
+    } catch (e) {
+      console.error('Failed to get terminal config on startup:', e);
+    }
+  }
+
+  const cfg = window._mdtermTerminalConfig || {};
+
+  const defaultFontFamily = '"JetBrains Mono", Menlo, Monaco, Consolas, "Courier New", monospace';
+  const rawFont = cfg.font_family || cfg.fontFamily;
+  const fontFamily = rawFont ? normalizeFontFamily(rawFont) : defaultFontFamily;
+  document.documentElement.style.setProperty('--font-mono', fontFamily);
+
+  const sessionObj = {
+    id: sId,
+    container,
+    cwd: '',
+    ro: null
+  };
+
+  const opts = {
+    onResize(cols, rows, pixelWidth, pixelHeight) {
+      if (hasTauri) {
+        // Resizes sent before pty_spawn resolves would hit "No active PTY
+        // session" and leave the PTY at a stale size, so chain them on spawn.
+        (sessionObj.ptyReady || Promise.resolve()).then(() => tauriInvokeFn('pty_resize', {
+          sessionId: sId,
+          cols,
+          rows,
+          pixelWidth,
+          pixelHeight
+        })).catch(() => {});
+      }
+    }
+  };
+
+  let termResult;
+  try {
+    termResult = await createTerminal(container, cfg, opts);
+  } catch (err) {
+    const errDiv = document.createElement('div');
+    errDiv.style.color = '#ef4444';
+    errDiv.style.padding = '20px';
+    errDiv.innerText = err.message || 'Failed to initialize terminal.';
+    container.appendChild(errDiv);
+    return;
+  }
+
+  const { term, fitAddon, dispose, scheduleResize } = termResult;
+  sessionObj.term = term;
+  sessionObj.fitAddon = fitAddon;
+  sessionObj.dispose = dispose;
+  sessionObj.scheduleResize = scheduleResize;
+
+  window._mdtermTerminal = term;
+  window._mdtermFitAddon = fitAddon;
+  window._mdtermSessions[sId] = sessionObj;
+
+  windowShow();
+
+  installTerminalIntegration(term, container, {
+    sId,
+    sessionObj,
+    hasTauri,
+    tauriInvokeFn,
+    getCwd: () => tauriInvokeFn('pty_get_cwd', { sessionId: sId }),
+    sendInput: (data) => tauriInvokeFn('pty_write', { sessionId: sId, data })
+  });
 
   if (hasTauri) {
     const initialCols = term.cols && term.cols > 2 ? term.cols : 80;
@@ -1149,6 +1183,7 @@ export function setTerminalTheme(themeName) {
   if (typeof window !== 'undefined') {
     window._mdtermCurrentTheme = themeName;
   }
+  tmuxSetTheme(themeName);
   let theme;
   if (typeof themeName === 'object' && themeName !== null) {
     theme = Object.assign({}, TERMINAL_THEMES.dark, themeName);
@@ -1192,6 +1227,7 @@ export function applyTerminalConfig(cfg) {
   if (cfg.theme) {
     setTerminalTheme(cfg.theme);
   }
+  tmuxApplyConfig();
   const rawFont = cfg.font_family || cfg.fontFamily;
   const normalizedFont = rawFont ? normalizeFontFamily(rawFont) : null;
   if (normalizedFont && typeof document !== 'undefined') {
@@ -1248,6 +1284,10 @@ export function clearTerminalSession(sessionId) {
 
 export function fitTerminalSession(sessionId) {
   const sId = sessionId || (typeof window !== 'undefined' && window._mdtermActiveSessionId);
+  if (isTmuxSessionId(sId)) {
+    fitTmuxWindow(sId);
+    return;
+  }
   const sess = (sId && typeof window !== 'undefined' && window._mdtermSessions && window._mdtermSessions[sId])
     ? window._mdtermSessions[sId]
     : null;
@@ -1265,6 +1305,10 @@ export function focusTerminalSession(sessionId) {
   const sId = sessionId || (typeof window !== 'undefined' && window._mdtermActiveSessionId);
   if (sId && typeof window !== 'undefined') {
     window._mdtermActiveSessionId = sId;
+  }
+  if (isTmuxSessionId(sId)) {
+    focusTmuxWindow(sId);
+    return;
   }
   const sess = (sId && typeof window !== 'undefined' && window._mdtermSessions && window._mdtermSessions[sId])
     ? window._mdtermSessions[sId]
@@ -1290,6 +1334,10 @@ export function focusTerminalSession(sessionId) {
 export function closeTerminalSession(sessionId) {
   const sId = sessionId || (typeof window !== 'undefined' && window._mdtermActiveSessionId);
   if (!sId) return;
+  if (isTmuxSessionId(sId)) {
+    unmountTmuxWindow(sId);
+    return;
+  }
   if (typeof window !== 'undefined' && window._mdtermSessions && window._mdtermSessions[sId]) {
     const sess = window._mdtermSessions[sId];
     try {

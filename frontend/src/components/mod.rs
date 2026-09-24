@@ -15,6 +15,7 @@ pub mod wysiwyg_editor;
 pub mod preview;
 pub mod terminal;
 pub mod titlebar;
+pub mod tmux_prompt;
 
 pub use header::{EditorHeader, FloatingControls};
 pub use modals::Modals;
@@ -23,5 +24,6 @@ pub use source_editor::SourceEditor;
 pub use split_editor::SplitEditor;
 pub use terminal::TerminalPane;
 pub use titlebar::{TitleBar, WindowResizeHandles};
+pub use tmux_prompt::TmuxPrompt;
 pub use wysiwyg_editor::WysiwygEditor;
 

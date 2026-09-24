@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>mdterm tmux control-mode harness</title>
+  <link rel="stylesheet" href="/frontend/vendor/xterm.css">
+  <link rel="stylesheet" href="/frontend/styles/main.css">
+  <script src="/frontend/vendor/xterm.js"></script>
+  <script src="/frontend/vendor/xterm-addon-fit.js"></script>
+  <script src="/frontend/vendor/xterm-addon-unicode11.js"></script>
+  <style>
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #0f141c; }
+    .tabs-workspace-container { position: absolute; left: 0; top: 0; width: 900px; height: 560px; }
+    .tab-workspace-pane { width: 100%; height: 100%; }
+    .terminal-pane-container { width: 100%; height: 100%; display: flex; }
+  </style>
+  <script>
+    // Mock of the Tauri globals: invoke() is bridged to the Node test process,
+    // channel frames are pushed in through __mockDeliver().
+    window.__mockListeners = {};
+    window.__TAURI__ = {
+      core: {
+        Channel: class { constructor() { this.onmessage = null; } },
+        invoke(cmd, args = {}) {
+          if (args.onEvent) {
+            window.__mockChannel = args.onEvent;
+            args = Object.assign({}, args, { onEvent: null });
+          }
+          if (cmd === 'get_terminal_config') return Promise.resolve({ font_family: 'monospace', font_size: 13 });
+          return window.__mockInvoke(cmd, args);
+        }
+      },
+      event: {
+        listen(name, cb) {
+          (window.__mockListeners[name] = window.__mockListeners[name] || []).push(cb);
+          return Promise.resolve(() => {});
+        }
+      }
+    };
+    window._mdtermTerminalConfig = { font_family: 'monospace', font_size: 13 };
+    window.__mockEmit = (name, payload) => (window.__mockListeners[name] || []).forEach(cb => cb({ payload }));
+    window.__mockDeliver = (frames) => frames.forEach(f => window.__mockChannel.onmessage(new Uint8Array(f).buffer));
+  </script>
+</head>
+<body>
+  <div class="tabs-workspace-container" id="workspaces"></div>
+  <script type="module">
+    import { initTerminalSession, focusTerminalSession, closeTerminalSession } from '/frontend/js/terminal-core.js';
+    import { tmuxAction } from '/frontend/js/tmux-client.js';
+
+    const ws = document.getElementById('workspaces');
+    const tabs = new Map();
+    let active = null;
+
+    function activate(sid) {
+      active = sid;
+      for (const [id, el] of tabs) {
+        el.className = 'tab-workspace-pane ' + (id === sid ? 'tab-workspace-active' : 'tab-workspace-hidden');
+      }
+      focusTerminalSession(sid);
+    }
+
+    window.addEventListener('mdterm-tmux-window-add', (e) => {
+      const { session_id: sid, activate: act } = e.detail;
+      const el = document.createElement('div');
+      el.className = 'tab-workspace-pane tab-workspace-hidden';
+      el.innerHTML = `<div class="terminal-pane-container full-width"><div class="terminal-pane"><div class="terminal-container" id="c-${sid}"></div></div></div>`;
+      ws.appendChild(el);
+      tabs.set(sid, el);
+      initTerminalSession('c-' + sid, sid);
+      if (act || tabs.size === 1) activate(sid);
+    });
+    window.addEventListener('mdterm-tmux-window-close', (e) => {
+      const sid = e.detail.session_id;
+      closeTerminalSession(sid);
+      const el = tabs.get(sid);
+      if (el) el.remove();
+      tabs.delete(sid);
+      if (active === sid && tabs.size) activate(tabs.keys().next().value);
+    });
+    window.addEventListener('mdterm-tmux-window-select', (e) => activate(e.detail.session_id));
+    window.addEventListener('mdterm-tmux-exit', () => { window.__tmuxExited = true; });
+    window.__openedFiles = [];
+    window.addEventListener('mdterm-open-file', (e) => window.__openedFiles.push(e.detail));
+    window.__renamedWindows = [];
+    window.addEventListener('mdterm-tmux-window-renamed', (e) => window.__renamedWindows.push(e.detail));
+
+    const conn = () => window.__mdtermTmux.connections.values().next().value;
+
+    window.harness = {
+      tabs: () => Array.from(tabs.keys()),
+      active: () => active,
+      activate,
+      action: (name) => tmuxAction(active, name),
+      panes() {
+        const c = conn();
+        if (!c) return [];
+        return Array.from(c.panes.values()).map(v => {
+          const r = v.el.getBoundingClientRect();
+          return {
+            id: v.id, window: v.windowId, live: v.live,
+            cols: v.term ? v.term.cols : 0, rows: v.term ? v.term.rows : 0,
+            visible: v.el.style.display !== 'none' && v.el.offsetParent !== null,
+            rect: { x: r.x, y: r.y, w: r.width, h: r.height },
+            alt: v.term ? v.term.buffer.active.type === 'alternate' : false,
+            cursor: v.term ? { x: v.term.buffer.active.cursorX, y: v.term.buffer.active.cursorY } : null
+          };
+        });
+      },
+      screen(paneId) {
+        const v = conn().panes.get(paneId);
+        const buf = v.term.buffer.active;
+        const out = [];
+        for (let i = 0; i < v.term.rows; i++) {
+          const line = buf.getLine(buf.viewportY + i);
+          out.push(line ? line.translateToString(true) : '');
+        }
+        return out;
+      },
+      normalBuffer(paneId) {
+        const v = conn().panes.get(paneId);
+        const buf = v.term.buffer.normal;
+        const out = [];
+        for (let i = 0; i < buf.length; i++) out.push(buf.getLine(i).translateToString(true));
+        return out;
+      },
+      focusPane(paneId) {
+        conn().panes.get(paneId).term.focus();
+      },
+      paneGeometry() {
+        return this.panes().map(p => ({ id: p.id, rect: p.rect }));
+      },
+      hasSelection(paneId) {
+        const v = conn()?.panes.get(paneId);
+        return v && v.term ? v.term.hasSelection() : false;
+      }
+    };
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>
