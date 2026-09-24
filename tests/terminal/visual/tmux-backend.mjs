@@ -6,14 +6,16 @@ import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 
 let socket = 'mdterm-e2e';
+let conf = '/dev/null';
 
 /** Each test gets its own server so a dying one can't race the next test. */
-export function useSocket(name) {
+export function useSocket(name, confPath) {
   socket = name;
+  conf = confPath || '/dev/null';
 }
 
 export function tmux(...args) {
-  return execFileSync('tmux', ['-L', socket, '-f', '/dev/null', ...args], {
+  return execFileSync('tmux', ['-L', socket, '-f', conf, ...args], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore'],
   });
@@ -61,19 +63,28 @@ export class ControlConnection {
     this.pending = [];
     this.block = null;
     this.buf = Buffer.alloc(0);
-    this.proc = spawn('tmux', ['-L', socket, '-f', '/dev/null', '-C', 'attach-session', '-t', session], {
+    this.hasExited = false;
+    this.proc = spawn('tmux', ['-L', socket, '-f', conf, '-C', 'attach-session', '-t', session], {
       stdio: ['pipe', 'pipe', 'ignore'],
     });
+    this.proc.stdin?.on('error', () => {});
     this.proc.stdout.on('data', (d) => this.feed(d));
-    this.exited = new Promise((resolve) => this.proc.on('exit', resolve));
+    this.exited = new Promise((resolve) => this.proc.on('exit', () => {
+      this.hasExited = true;
+      resolve();
+    }));
   }
 
   write(commands, tags) {
+    if (this.hasExited || !this.proc.stdin || this.proc.stdin.destroyed || this.proc.stdin.writableEnded) return;
     commands.forEach((_, i) => this.pending.push(tags[i] || 0));
-    this.proc.stdin.write(commands.join(' ; ') + '\n');
+    try {
+      this.proc.stdin.write(commands.join(' ; ') + '\n');
+    } catch (_) {}
   }
 
   sendKeys(pane, bytes) {
+    if (this.hasExited || !this.proc.stdin || this.proc.stdin.destroyed || this.proc.stdin.writableEnded) return;
     for (let i = 0; i < bytes.length; i += 256) {
       const hex = Array.from(bytes.slice(i, i + 256), b => b.toString(16).padStart(2, '0')).join(' ');
       this.write([`send-keys -H -t %${pane} ${hex}`], [0]);
@@ -153,6 +164,9 @@ export class ControlConnection {
         break;
       case '%pause':
         this.write([`refresh-client -A '%${id(args[0])}:continue'`], [0]);
+        break;
+      case '%pane-mode-changed':
+        this.json({ t: 'pane-mode-changed', pane: id(args[0]) });
         break;
       case '%exit':
         this.json({ t: 'exit', reason: args.join(' ') || null });

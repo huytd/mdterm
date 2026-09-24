@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test replay.test.mjs",
+    "test": "node --test replay.test.mjs tmux-keys.test.mjs",
     "test:visual": "playwright test",
     "vendor:sync": "node scripts/vendor-sync.mjs"
   },

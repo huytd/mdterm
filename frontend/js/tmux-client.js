@@ -11,6 +11,8 @@
  */
 
 import { createTerminal, installTerminalIntegration, buildTerminalOptions, getTerminalTheme } from './terminal-core.js';
+import { keyEventToTmux, parseListKeys, createKeyRouter } from './tmux-keys.js';
+import { showPrompt, showConfirm, showOverlayText, setPrefixBadge, showPaneBadge, showPaneModeOverlay } from './tmux-ui.js';
 
 const SESSION_PREFIX = 'tmux-';
 const DEFAULT_SCROLLBACK = 2000;
@@ -21,7 +23,8 @@ const PANE_FIELDS = [
   'cursor_flag', 'keypad_cursor_flag', 'keypad_flag', 'mouse_any_flag',
   'mouse_button_flag', 'mouse_standard_flag', 'mouse_sgr_flag', 'mouse_utf8_flag',
   'insert_flag', 'wrap_flag', 'origin_flag', 'scroll_region_upper',
-  'scroll_region_lower', 'pane_width', 'pane_height', 'pane_current_path', 'pane_title'
+  'scroll_region_lower', 'pane_width', 'pane_height', 'pane_current_path', 'pane_title',
+  'pane_current_command'
 ];
 const WINDOW_FIELDS = [
   'window_id', 'window_index', 'window_active', 'window_layout',
@@ -43,6 +46,11 @@ function parseRow(line, fields) {
 }
 
 const idNum = (s) => Number(String(s).replace(/^[%@$]/, ''));
+
+/** Quotes a value as one tmux command argument (double quotes; `\`, `"`, `$` escaped). */
+export function tmuxQuote(value) {
+  return '"' + String(value).replace(/[\\"$]/g, (c) => '\\' + c) + '"';
+}
 
 // ---------------------------------------------------------------------------
 // Layout strings: "8205,80x24,0,0{40x24,0,0,0,39x24,41,0,1}"
@@ -209,7 +217,35 @@ class PaneView {
     this.cols = 0;
     this.rows = 0;
     this.cwd = '';
+    this.command = '';
     this.sessionObj = { id: '', container: this.el, cwd: '' };
+    this.tmuxMode = null;
+    this.modeOverlay = null;
+    this.scrollbackBadge = null;
+    this.scrollbackListener = null;
+    this.gripEl = null;
+
+    this.el.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      if (e.altKey && e.shiftKey) {
+        const win = this.conn.windows.get(this.windowId);
+        if (!win) return;
+        const z = (win.flags || '').includes('Z');
+        const l = layoutPanes(win.visible || win.layout);
+        if (l.length <= 1 || z) return;
+        e.preventDefault();
+        e.stopPropagation();
+        this.conn.startPaneDrag(e, this, win);
+      }
+    }, true);
+
+    this.el.addEventListener('mousedown', (e) => {
+      if (e.button === 0 && e.altKey && e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }, true);
+
     this.el.addEventListener('mousedown', () => conn.selectPane(this.id));
   }
 
@@ -277,8 +313,29 @@ class PaneView {
     this.term.write(this.decoder.decode(bytes, { stream: true }));
   }
 
+  clearTmuxMode() {
+    this.tmuxMode = null;
+    if (this.modeOverlay) {
+      try { this.modeOverlay.close(); } catch (e) {}
+      this.modeOverlay = null;
+    }
+  }
+
+  clearScrollbackBadge() {
+    if (this.scrollbackBadge) {
+      try { this.scrollbackBadge.remove(); } catch (e) {}
+      this.scrollbackBadge = null;
+    }
+    if (this.scrollbackListener) {
+      try { this.scrollbackListener.dispose(); } catch (e) {}
+      this.scrollbackListener = null;
+    }
+  }
+
   destroy() {
     this.disposed = true;
+    this.clearTmuxMode();
+    this.clearScrollbackBadge();
     if (this.reseedTimer) clearTimeout(this.reseedTimer);
     if (this.dispose) {
       try { this.dispose(); } catch (e) {}
@@ -305,6 +362,12 @@ class TmuxConnection {
     this.scrollback = Number((currentConfig().tmux || {}).scrollback) || DEFAULT_SCROLLBACK;
     this.resizeTimer = null;
     this.newWindowBroken = false;
+    this.router = null;
+    this.activePrompt = null;
+    this.activeConfirm = null;
+    this.activeOverlay = null;
+    this.refreshRouterTimer = null;
+    this.prefixBadgeTimer = null;
   }
 
   // ---- transport -------------------------------------------------------
@@ -325,6 +388,37 @@ class TmuxConnection {
       this.newWindowBroken = r.ok && /^3\.5/.test(r.lines[0] || '');
     });
     this.refreshWindows(true);
+    this.loadKeyTables();
+  }
+
+  loadKeyTables() {
+    this.run(
+      ['show -gv prefix', 'show -gv prefix2', 'show -gv repeat-time', 'list-keys'],
+      ([rPrefix, rPrefix2, rRepeat, rKeys]) => {
+        if (!rPrefix || !rKeys || !rPrefix.ok || !rKeys.ok) return;
+        let prefix = (rPrefix.lines[0] || '').trim();
+        if (!prefix || prefix === 'None') prefix = 'C-b';
+        let prefix2 = rPrefix2 && rPrefix2.ok ? (rPrefix2.lines[0] || '').trim() : null;
+        if (!prefix2 || prefix2 === 'None') prefix2 = null;
+        const repeatTime = Number((rRepeat && rRepeat.lines[0] ? rRepeat.lines[0] : '').trim()) || 500;
+        const { tables } = parseListKeys(rKeys.lines);
+        this.router = createKeyRouter({
+          tables,
+          prefix,
+          prefix2,
+          repeatTime,
+          now: () => Date.now()
+        });
+        this.repeatTime = repeatTime;
+      }
+    );
+  }
+
+  scheduleKeyTablesRefresh() {
+    if (this.refreshRouterTimer) clearTimeout(this.refreshRouterTimer);
+    this.refreshRouterTimer = setTimeout(() => {
+      this.loadKeyTables();
+    }, 500);
   }
 
   noteOrigin(text) {
@@ -392,6 +486,9 @@ class TmuxConnection {
   }
 
   detach() {
+    if (this.activePaneDrag) {
+      this.activePaneDrag.cancel();
+    }
     return invoke('tmux_detach', { connId: this.id }).catch(() => {});
   }
 
@@ -410,6 +507,9 @@ class TmuxConnection {
       case 'layout': {
         const w = this.windows.get(ev.window);
         if (w) {
+          if (this.activePaneDrag && this.activePaneDrag.windowId === ev.window) {
+            this.activePaneDrag.cancel();
+          }
           w.layout = parseLayout(ev.layout);
           w.visible = parseLayout(ev.visible) || w.layout;
           w.flags = ev.flags || '';
@@ -446,10 +546,30 @@ class TmuxConnection {
           dispatch('mdterm-tmux-window-select', { session_id: tmuxSessionId(this.id, ev.window) });
         }
         break;
+      case 'pane-mode-changed': {
+        const view = this.panes.get(ev.pane);
+        if (view) {
+          this.run([`display -p -t %${ev.pane} '#{pane_mode}'`], ([r]) => {
+            if (r && r.ok) {
+              const mode = (r.lines[0] || '').trim();
+              if (mode) {
+                view.tmuxMode = mode;
+                if (!view.modeOverlay) {
+                  view.modeOverlay = showPaneModeOverlay({ paneEl: view.el, mode });
+                }
+              } else {
+                view.clearTmuxMode();
+              }
+            }
+          });
+        }
+        break;
+      }
       case 'session-changed':
         this.sessionName = ev.name;
         for (const id of Array.from(this.windows.keys())) this.removeWindow(id);
         this.refreshWindows(true);
+        this.loadKeyTables();
         break;
       case 'session-renamed':
         this.sessionName = ev.name;
@@ -558,6 +678,9 @@ class TmuxConnection {
   }
 
   unmount(windowId) {
+    if (this.activePaneDrag && this.activePaneDrag.windowId === windowId) {
+      this.activePaneDrag.cancel();
+    }
     const m = this.mounts.get(windowId);
     if (m) {
       if (m.ro) m.ro.disconnect();
@@ -575,6 +698,8 @@ class TmuxConnection {
     const el = mount.el;
     const leaves = layoutPanes(root);
     const multi = leaves.length > 1;
+    const zoomed = (w.flags || '').includes('Z');
+    const canDrag = multi && !zoomed;
     const seen = new Set();
     for (const leaf of leaves) {
       seen.add(leaf.pane);
@@ -596,12 +721,45 @@ class TmuxConnection {
       view.el.classList.toggle('tmux-pane-inactive', multi && leaf.pane !== w.activePane);
       view.setSize(leaf.w, leaf.h);
       view.ensureTerm();
+
+      if (!view.gripEl) {
+        const grip = document.createElement('div');
+        grip.className = 'tmux-pane-grip';
+        grip.textContent = '⠿';
+        grip.title = 'Drag to swap or move pane';
+        grip.addEventListener('pointerdown', (e) => {
+          if (e.button !== 0) return;
+          const win = this.windows.get(view.windowId);
+          if (!win) return;
+          const z = (win.flags || '').includes('Z');
+          const l = layoutPanes(win.visible || win.layout);
+          if (l.length <= 1 || z) return;
+          e.preventDefault();
+          e.stopPropagation();
+          this.startPaneDrag(e, view, win);
+        });
+        grip.addEventListener('mousedown', (e) => {
+          if (e.button === 0) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        });
+        view.gripEl = grip;
+        view.el.appendChild(grip);
+      }
+      view.gripEl.style.display = canDrag ? '' : 'none';
     }
     // Panes of this window hidden by zoom stay alive but invisible.
     for (const view of this.panes.values()) {
-      if (view.windowId === w.id && !seen.has(view.id)) view.el.style.display = 'none';
+      if (view.windowId === w.id && !seen.has(view.id)) {
+        view.el.style.display = 'none';
+        if (view.gripEl) view.gripEl.style.display = 'none';
+      }
     }
     el.querySelectorAll('.tmux-divider').forEach(d => d.remove());
+    if (!this.activePaneDrag || this.activePaneDrag.windowId !== w.id) {
+      el.querySelectorAll('.tmux-drop-indicator, .tmux-drag-ghost').forEach(x => x.remove());
+    }
     if (multi) this.renderDividers(el, root, cw, ch);
   }
 
@@ -660,6 +818,223 @@ class TmuxConnection {
     };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
+  }
+
+  startPaneDrag(e, sourceView, w) {
+    const mount = this.mounts.get(w.id);
+    if (!mount || !this.cell) return;
+    const leaves = layoutPanes(w.visible || w.layout);
+    if (leaves.length <= 1 || (w.flags || '').includes('Z')) return;
+
+    const mountRect = mount.el.getBoundingClientRect();
+    const { width: cw, height: ch } = this.cell;
+    const sourceLeaf = leaves.find(l => l.pane === sourceView.id);
+    const sourceW = sourceLeaf ? sourceLeaf.w * cw : sourceView.el.offsetWidth;
+    const sourceH = sourceLeaf ? sourceLeaf.h * ch : sourceView.el.offsetHeight;
+
+    document.body.classList.add('tmux-dragging-pane');
+    sourceView.el.classList.add('tmux-pane-drag-source');
+
+    const ghost = document.createElement('div');
+    ghost.className = 'tmux-drag-ghost';
+    const gw = Math.max(60, Math.round(sourceW * 0.4));
+    const gh = Math.max(30, Math.round(sourceH * 0.4));
+    ghost.style.width = `${gw}px`;
+    ghost.style.height = `${gh}px`;
+    ghost.textContent = sourceView.command || 'pane';
+    ghost.style.left = `${e.clientX - mountRect.left}px`;
+    ghost.style.top = `${e.clientY - mountRect.top}px`;
+    mount.el.appendChild(ghost);
+
+    let ended = false;
+    if (!sourceView.command) {
+      this.run([`display -p -t %${sourceView.id} '#{pane_current_command}'`], ([r]) => {
+        if (r && r.ok && r.lines[0]) {
+          sourceView.command = r.lines[0];
+          if (!ended) ghost.textContent = r.lines[0];
+        }
+      });
+    }
+
+    const indicator = document.createElement('div');
+    indicator.className = 'tmux-drop-indicator';
+    indicator.style.display = 'none';
+    const dropLabel = document.createElement('div');
+    dropLabel.className = 'tmux-drop-label';
+    indicator.appendChild(dropLabel);
+    mount.el.appendChild(indicator);
+
+    let currentDrop = null;
+
+    const captureTarget = e.target;
+    if (captureTarget && captureTarget.setPointerCapture && e.pointerId !== undefined) {
+      try { captureTarget.setPointerCapture(e.pointerId); } catch (_) {}
+    }
+
+    const updateZone = (clientX, clientY) => {
+      const relX = clientX - mountRect.left;
+      const relY = clientY - mountRect.top;
+      ghost.style.left = `${relX}px`;
+      ghost.style.top = `${relY}px`;
+
+      const targetLeaf = leaves.find(l => {
+        const lx = l.x * cw, ly = l.y * ch;
+        const lw = l.w * cw, lh = l.h * ch;
+        return relX >= lx && relX < lx + lw && relY >= ly && relY < ly + lh;
+      });
+
+      if (!targetLeaf || targetLeaf.pane === sourceView.id) {
+        currentDrop = null;
+        indicator.style.display = 'none';
+        return;
+      }
+
+      const lx = targetLeaf.x * cw;
+      const ly = targetLeaf.y * ch;
+      const lw = targetLeaf.w * cw;
+      const lh = targetLeaf.h * ch;
+      const px = (relX - lx) / lw;
+      const py = (relY - ly) / lh;
+
+      const inCentre = px >= 0.25 && px <= 0.75 && py >= 0.25 && py <= 0.75;
+      if (inCentre) {
+        currentDrop = { targetPaneId: targetLeaf.pane, type: 'swap' };
+        indicator.style.display = 'flex';
+        indicator.style.left = `${lx}px`;
+        indicator.style.top = `${ly}px`;
+        indicator.style.width = `${lw}px`;
+        indicator.style.height = `${lh}px`;
+        dropLabel.textContent = 'Swap';
+      } else {
+        const dLeft = px;
+        const dRight = 1 - px;
+        const dTop = py;
+        const dBottom = 1 - py;
+        const min = Math.min(dLeft, dRight, dTop, dBottom);
+
+        if (min === dLeft) {
+          currentDrop = { targetPaneId: targetLeaf.pane, type: 'move', edge: 'left' };
+          indicator.style.display = 'flex';
+          indicator.style.left = `${lx}px`;
+          indicator.style.top = `${ly}px`;
+          indicator.style.width = `${Math.round(lw / 2)}px`;
+          indicator.style.height = `${lh}px`;
+          dropLabel.textContent = 'Move left';
+        } else if (min === dRight) {
+          const halfW = Math.round(lw / 2);
+          currentDrop = { targetPaneId: targetLeaf.pane, type: 'move', edge: 'right' };
+          indicator.style.display = 'flex';
+          indicator.style.left = `${lx + halfW}px`;
+          indicator.style.top = `${ly}px`;
+          indicator.style.width = `${lw - halfW}px`;
+          indicator.style.height = `${lh}px`;
+          dropLabel.textContent = 'Move right';
+        } else if (min === dTop) {
+          currentDrop = { targetPaneId: targetLeaf.pane, type: 'move', edge: 'top' };
+          indicator.style.display = 'flex';
+          indicator.style.left = `${lx}px`;
+          indicator.style.top = `${ly}px`;
+          indicator.style.width = `${lw}px`;
+          indicator.style.height = `${Math.round(lh / 2)}px`;
+          dropLabel.textContent = 'Move up';
+        } else {
+          const halfH = Math.round(lh / 2);
+          currentDrop = { targetPaneId: targetLeaf.pane, type: 'move', edge: 'bottom' };
+          indicator.style.display = 'flex';
+          indicator.style.left = `${lx}px`;
+          indicator.style.top = `${ly + halfH}px`;
+          indicator.style.width = `${lw}px`;
+          indicator.style.height = `${lh - halfH}px`;
+          dropLabel.textContent = 'Move down';
+        }
+      }
+    };
+
+    updateZone(e.clientX, e.clientY);
+
+    const cleanup = () => {
+      if (ended) return;
+      ended = true;
+      document.body.classList.remove('tmux-dragging-pane');
+      sourceView.el.classList.remove('tmux-pane-drag-source');
+      ghost.remove();
+      indicator.remove();
+      if (captureTarget && captureTarget.releasePointerCapture && e.pointerId !== undefined) {
+        try { captureTarget.releasePointerCapture(e.pointerId); } catch (_) {}
+      }
+      window.removeEventListener('pointermove', onPointerMove, true);
+      window.removeEventListener('pointerup', onPointerUp, true);
+      window.removeEventListener('pointercancel', onPointerCancel, true);
+      document.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('blur', onBlur, true);
+      if (this.activePaneDrag?.cancel === cancelDrag) {
+        this.activePaneDrag = null;
+      }
+    };
+
+    const cancelDrag = () => {
+      cleanup();
+    };
+
+    const onPointerMove = (ev) => {
+      if (ended) return;
+      updateZone(ev.clientX, ev.clientY);
+    };
+
+    const onPointerUp = (ev) => {
+      if (ended) return;
+      const drop = currentDrop;
+      cleanup();
+      if (!drop) return;
+
+      const sourceId = sourceView.id;
+      const targetId = drop.targetPaneId;
+      if (sourceId === targetId) return;
+
+      let cmds = [];
+      if (drop.type === 'swap') {
+        cmds = [`swap-pane -s %${sourceId} -t %${targetId}`, `select-pane -t %${sourceId}`];
+      } else if (drop.type === 'move') {
+        let flag = '';
+        if (drop.edge === 'right') flag = '-h';
+        else if (drop.edge === 'left') flag = '-h -b';
+        else if (drop.edge === 'bottom') flag = '-v';
+        else if (drop.edge === 'top') flag = '-v -b';
+        cmds = [`move-pane -s %${sourceId} -t %${targetId} ${flag}`, `select-pane -t %${sourceId}`];
+      }
+
+      if (cmds.length > 0) {
+        mount.el.classList.add('tmux-animate');
+        setTimeout(() => { mount.el.classList.remove('tmux-animate'); }, 200);
+        this.run(cmds, (replies) => {
+          for (const r of replies) this.showReply(r);
+        });
+      }
+    };
+
+    const onPointerCancel = () => {
+      cancelDrag();
+    };
+
+    const onKeyDown = (ev) => {
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        ev.stopPropagation();
+        cancelDrag();
+      }
+    };
+
+    const onBlur = () => {
+      cancelDrag();
+    };
+
+    window.addEventListener('pointermove', onPointerMove, true);
+    window.addEventListener('pointerup', onPointerUp, true);
+    window.addEventListener('pointercancel', onPointerCancel, true);
+    document.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('blur', onBlur, true);
+
+    this.activePaneDrag = { windowId: w.id, cancel: cancelDrag };
   }
 
   // ---- sizing ----------------------------------------------------------
@@ -729,6 +1104,13 @@ class TmuxConnection {
     this.clientSize = null;
     for (const w of this.windows.values()) this.renderWindow(w);
     this.scheduleClientResize();
+    const tmuxCfg = cfg.tmux || {};
+    if (tmuxCfg.prefix_emulation !== false && tmuxCfg.prefixEmulation !== false) {
+      this.loadKeyTables();
+    } else {
+      this.router = null;
+      this.setPrefixIndicatorState(null);
+    }
   }
 
   setTheme(theme) {
@@ -766,6 +1148,7 @@ class TmuxConnection {
       }
       const m = parseRow(meta.lines[0] || '', PANE_FIELDS);
       view.cwd = m.pane_current_path;
+      view.command = m.pane_current_command || '';
       view.sessionObj.cwd = m.pane_current_path;
       const w = Number(m.pane_width), h = Number(m.pane_height);
       if (w > 0 && h > 0) view.setSize(w, h);
@@ -785,6 +1168,9 @@ class TmuxConnection {
     if (!view) return;
     const w = this.windows.get(view.windowId);
     if (w && w.activePane !== pane) {
+      // Only a pane switch cancels a pending prefix; focus moves that just
+      // follow tmux (e.g. a late %window-pane-changed) must not eat the key.
+      this.resetPrefix();
       w.activePane = pane;
       this.renderWindow(w);
       this.run([`select-pane -t %${pane}`]);
@@ -813,6 +1199,7 @@ class TmuxConnection {
     const w = this.windows.get(windowId);
     if (!w) return;
     if (this.activeWindow !== windowId) {
+      this.resetPrefix();
       this.activeWindow = windowId;
       this.run([`select-window -t @${windowId}`]);
     }
@@ -862,20 +1249,290 @@ class TmuxConnection {
     }
   }
 
-  /** Pane-level shortcuts (split, navigate, zoom, detach). Returns true if handled. */
+  /** Pane-level shortcuts and tmux prefix key routing. Returns true if handled. */
   handleKey(pane, ev) {
     if (ev.type !== 'keydown') return false;
     const view = this.panes.get(pane);
     if (!view) return false;
+
+    // Safety net: pane in a tmux mode (e.g. external copy-mode)
+    if (view.tmuxMode) {
+      if (ev.key === 'Escape') {
+        this.run([`send-keys -X -t %${pane} cancel`]);
+        view.clearTmuxMode();
+      }
+      return true; // Swallow all keys while in tmux mode
+    }
+
+    const tmuxCfg = currentConfig().tmux || {};
+    const prefixEmulation = tmuxCfg.prefix_emulation !== false && tmuxCfg.prefixEmulation !== false;
+
+    if (prefixEmulation && this.router) {
+      const name = keyEventToTmux(ev);
+      if (name) {
+        const r = this.router.handle(name);
+        this.updatePrefixIndicator(view);
+        if (r.consume) {
+          this.applyRouted(view, r);
+          return true;
+        }
+      }
+    }
+
     const act = tmuxShortcut(ev);
     if (!act) return false;
     this.action(view.windowId, act);
     return true;
   }
 
+  /** Focuses whichever pane tmux has active in the window (after an overlay closes). */
+  focusActiveIn(windowId) {
+    const w = this.windows.get(windowId);
+    if (!w) return;
+    const pane = w.activePane ?? (firstPane(w.visible || w.layout) || {}).pane;
+    if (pane !== undefined) this.focusPane(pane);
+  }
+
+  resetPrefix() {
+    if (this.router) this.router.reset();
+    this.setPrefixIndicatorState(null);
+  }
+
+  updatePrefixIndicator(view) {
+    if (!this.router) {
+      this.setPrefixIndicatorState(null);
+      return;
+    }
+    const s = this.router.state();
+    if (s.table !== 'root') {
+      let text = s.table === 'prefix' ? 'PREFIX' : s.table.toUpperCase();
+      if (s.inRepeat) text += ' REPEAT';
+      this.setPrefixIndicatorState(text, view);
+      if (this.prefixBadgeTimer) clearTimeout(this.prefixBadgeTimer);
+      const delay = (this.repeatTime || 500) + 50;
+      this.prefixBadgeTimer = setTimeout(() => {
+        this.updatePrefixIndicator(view);
+      }, delay);
+    } else {
+      if (this.prefixBadgeTimer) clearTimeout(this.prefixBadgeTimer);
+      this.setPrefixIndicatorState(null);
+    }
+  }
+
+  setPrefixIndicatorState(text, activeView) {
+    const key = text ? `${text}|${activeView ? activeView.id : ''}` : null;
+    if (key === this.prefixIndicatorKey) return;
+    this.prefixIndicatorKey = key;
+    for (const mount of this.mounts.values()) {
+      if (text) mount.el.classList.add('tmux-prefix-active');
+      else mount.el.classList.remove('tmux-prefix-active');
+    }
+    for (const view of this.panes.values()) {
+      if (text && activeView && view.id === activeView.id) {
+        setPrefixBadge(view.el, text);
+      } else {
+        setPrefixBadge(view.el, null);
+      }
+    }
+  }
+
+  applyRouted(view, r) {
+    this.scheduleKeyTablesRefresh();
+    if (r.run) {
+      const cmd = r.run.trim();
+      // Workaround for tmux 3.5a crash on bound new-window:
+      if (this.newWindowBroken && /^(?:new-window|neww)(?:\s+-[ac](?:\s+\S+)?)*$/.test(cmd)) {
+        const t = view.id !== null && view.id !== undefined ? `-t %${view.id}` : '';
+        const cwd = view.id !== null && view.id !== undefined ? ` -c '#{pane_current_path}'` : '';
+        this.run([`split-window ${t}${cwd}`, 'break-pane -a']);
+      } else {
+        this.run([cmd], ([res]) => this.showReply(res));
+      }
+      return;
+    }
+
+    if (r.native) {
+      this.handleNativeUI(view, r.native);
+    }
+  }
+
+  handleNativeUI(view, native) {
+    const mount = this.mounts.get(view.windowId);
+    if (!mount) return;
+
+    switch (native.name) {
+      case 'copy-mode': {
+        if (view.term) {
+          view.term.focus();
+          if (native.scrollUp) {
+            view.term.scrollPages(-1);
+          }
+          view.clearScrollbackBadge();
+          view.scrollbackBadge = showPaneBadge(view.el, 'SCROLLBACK');
+          view.scrollbackListener = view.term.onScroll(() => {
+            const buf = view.term.buffer.active;
+            if (buf.viewportY >= buf.baseY) {
+              view.clearScrollbackBadge();
+            }
+          });
+        }
+        break;
+      }
+      case 'command-prompt': {
+        const paneId = view.id;
+        const initialToExpand = native.initial || '';
+        const promptToExpand = native.prompt || ':';
+
+        const doShow = (initialVal, promptVal) => {
+          if (this.activePrompt) {
+            try { this.activePrompt.close(); } catch (e) {}
+            this.activePrompt = null;
+          }
+          this.activePrompt = showPrompt({
+            mount: mount.el,
+            prompt: promptVal,
+            initial: initialVal,
+            onSubmit: (val, { close, setError }) => {
+              if (native.template) {
+                let cmd = native.template;
+                if (cmd.startsWith('{') && cmd.endsWith('}')) {
+                  cmd = cmd.slice(1, -1).trim();
+                }
+                const escaped = tmuxQuote(val).slice(1, -1);
+                cmd = cmd.replace(/%%%/g, tmuxQuote(val)).replace(/%%/g, escaped).replace(/%1/g, escaped);
+                this.run([cmd], ([res]) => {
+                  if (res && !res.ok) {
+                    setError(res.lines[0] || 'Error');
+                  } else {
+                    close();
+                    this.activePrompt = null;
+                    this.focusActiveIn(view.windowId);
+                    if (res) this.showReply(res);
+                  }
+                });
+              } else {
+                this.run([val], ([res]) => {
+                  if (res && !res.ok) {
+                    setError(res.lines[0] || 'Error');
+                  } else {
+                    close();
+                    this.activePrompt = null;
+                    this.focusActiveIn(view.windowId);
+                    if (res) this.showReply(res);
+                  }
+                });
+              }
+            },
+            onCancel: () => {
+              this.activePrompt = null;
+              this.focusActiveIn(view.windowId);
+            }
+          });
+        };
+
+        if (initialToExpand.includes('#') || promptToExpand.includes('#')) {
+          this.run([
+            `display -p -t %${paneId} ${tmuxQuote(initialToExpand)}`,
+            `display -p -t %${paneId} ${tmuxQuote(promptToExpand)}`
+          ], ([rInit, rPrompt]) => {
+            const initVal = rInit && rInit.ok ? rInit.lines[0] : initialToExpand;
+            const pVal = rPrompt && rPrompt.ok ? rPrompt.lines[0] : promptToExpand;
+            doShow(initVal, pVal);
+          });
+        } else {
+          doShow(initialToExpand, promptToExpand);
+        }
+        break;
+      }
+      case 'confirm-before': {
+        const paneId = view.id;
+        const promptToExpand = native.prompt || `Confirm '${native.cmd}'? (y/n)`;
+
+        const doConfirm = (text) => {
+          if (this.activeConfirm) {
+            try { this.activeConfirm.close(); } catch (e) {}
+            this.activeConfirm = null;
+          }
+          this.activeConfirm = showConfirm({
+            mount: mount.el,
+            text,
+            onYes: () => {
+              this.activeConfirm = null;
+              this.run([native.cmd], ([res]) => this.showReply(res));
+              this.focusActiveIn(view.windowId);
+            },
+            onNo: () => {
+              this.activeConfirm = null;
+              this.focusActiveIn(view.windowId);
+            }
+          });
+        };
+
+        if (promptToExpand.includes('#')) {
+          this.run([`display -p -t %${paneId} ${tmuxQuote(promptToExpand)}`], ([rPrompt]) => {
+            const text = rPrompt && rPrompt.ok ? rPrompt.lines[0] : promptToExpand;
+            doConfirm(text);
+          });
+        } else {
+          doConfirm(promptToExpand);
+        }
+        break;
+      }
+      case 'detach-client': {
+        this.detach();
+        break;
+      }
+      case 'unsupported': {
+        toast(`${native.command || 'Command'} isn't available in mdterm's tmux mode`);
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  showReply(res) {
+    if (!res) return;
+    if (!res.ok) {
+      toast(res.lines[0] || 'Command failed');
+      return;
+    }
+    const lines = res.lines || [];
+    for (const line of lines) {
+      if (line.startsWith('%message ')) {
+        toast(line.slice(9));
+      }
+    }
+    const printLines = lines.filter(l => !l.startsWith('%message ') && l.trim().length > 0);
+    if (printLines.length > 0) {
+      const w = this.windows.get(this.activeWindow);
+      const mount = w ? this.mounts.get(w.id) : null;
+      if (mount) {
+        showOverlayText({
+          mount: mount.el,
+          lines: printLines,
+          onClose: () => {
+            if (w) this.focusActiveIn(w.id);
+          }
+        });
+      }
+    }
+  }
+
+
   shutdown(reason) {
     if (this.closed) return;
     this.closed = true;
+    if (this.refreshRouterTimer) clearTimeout(this.refreshRouterTimer);
+    if (this.prefixBadgeTimer) clearTimeout(this.prefixBadgeTimer);
+    if (this.activePrompt) {
+      try { this.activePrompt.close(); } catch (e) {}
+      this.activePrompt = null;
+    }
+    if (this.activeConfirm) {
+      try { this.activeConfirm.close(); } catch (e) {}
+      this.activeConfirm = null;
+    }
     for (const id of Array.from(this.windows.keys())) this.removeWindow(id);
     for (const view of this.panes.values()) view.destroy();
     this.panes.clear();

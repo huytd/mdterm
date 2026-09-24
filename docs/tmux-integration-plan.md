@@ -22,7 +22,9 @@ Decisions taken: tmux windows → mdterm tabs; launch behaviour `ask`; native sh
 | Shared terminal integration (clipboard, OSC 5337/52/7, links) for PTY tabs and panes | `terminal-core.js: installTerminalIntegration` | done |
 | `pty_get_cwd` no longer shells out to tmux while a control client is attached | `lib.rs` | done |
 | 3.5a `new-window` crash workaround (`split-window ; break-pane`) | `tmux-client.js` | done (untested on 3.5a) |
-| Prefix-key emulation, hidden-window output suppression, session switcher, drag-to-rearrange | — | not started |
+| Prefix-key emulation (custom bindings, repeat, root tables, native UI overlays) | `frontend/js/tmux-keys.js`, `tmux-ui.js`, `tmux-client.js` | done |
+| Drag-to-swap and move panes (grip on hover, Alt+Shift drag, geometry hit-testing, edge move) | `frontend/js/tmux-client.js`, `frontend/styles/main.css` | done |
+| Hidden-window output suppression, session switcher, cross-window tab drop | — | not started |
 
 Notes from implementation:
 

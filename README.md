@@ -291,11 +291,33 @@ tmux:
   integration: "ask"   # ask | auto | off
   session: ""          # attach target for "auto"; empty = most recent session
   scrollback: 2000     # history lines loaded into each pane on attach
+  prefix_emulation: true # emulate tmux prefix key and key bindings
 ```
 
-In control mode keystrokes go straight to the pane, so tmux's prefix key is not interpreted;
-use the shortcuts below (or tmux commands from a shell). Requires tmux 3.2 or newer
-(3.4+ recommended). Detaching leaves the tmux session running.
+Prefix-key emulation is enabled by default (`prefix_emulation: true`); pressing your tmux prefix
+(e.g. `Ctrl+B`) executes the bound command from your `~/.tmux.conf`, including custom bindings,
+repeat (`bind -r`), root bindings (`bind -n`), and custom key tables (`switch-client -T`). An active
+prefix indicator badge appears in the bottom-right corner of the pane.
+
+* **Native UI emulation:**
+  * `copy-mode` (`[`, `PageUp`): Scrolls pane into native scrollback with a `SCROLLBACK` badge. Native text selection and copying replace tmux copy mode without trapping the pane in an invisible terminal mode.
+  * `command-prompt` (`:`, `,`): Opens a native interactive bottom prompt with format expansion (e.g. `#W`), command execution, and inline error reporting.
+  * `confirm-before` (`x`): Prompts with a native confirmation bar (`y`/`n`).
+  * `detach-client` (`d`): Cleanly detaches from tmux, leaving sessions running.
+  * `display-message`: Displays tmux status messages as unobtrusive toasts.
+* **Unavailable UI commands:** Commands that draw tmux-internal curses menus/dialogs (`display-menu`,
+  `display-popup`, `choose-tree`, `choose-buffer`, `choose-client`, `customize-mode`, `clock-mode`,
+  `show-messages`) display a clear notification that the command is unavailable in native mode.
+* **Pane drag to swap / move:**
+  * In windows with 2 or more visible panes (when not zoomed), hovering a pane reveals a grip (`⠿`) at its top edge.
+  * Dragging the grip or holding **`Alt + Shift` and dragging anywhere** within the pane initiates a layout drag with real-time drop zones and preview ghost:
+    * **Drop on centre:** Swaps the panes (`swap-pane`) and focuses the dragged pane.
+    * **Drop on top/bottom/left/right edge:** Moves the pane to that edge (`move-pane -h/-v [-b]`) and focuses it.
+    * Dropping on the source pane or outside cancels without modifying layout.
+    * Pressing `Escape` or losing window focus cancels the drag.
+    * Plain mouse dragging inside a pane continues to select terminal text normally.
+
+Requires tmux 3.2 or newer (3.4+ recommended). Detaching leaves the tmux session running.
 
 ### Terminal rendering tests
 
@@ -346,6 +368,8 @@ reproduce it, then `node tests/terminal/scripts/import-recording.mjs /tmp/mdterm
 | `/` | In WYSIWYG | Open Slash Command popup on any line |
 | `Tab` / `Shift + Tab` | In Editor | Indent / Outdent list item or insert spaces |
 | `Ctrl + F / B / A / E / ...` | In Terminal | Terminal Emacs readline navigation (forward, backward, line start/end) |
+| `Prefix` (`Ctrl + B` by default) | tmux pane | Enter tmux prefix mode (executes bindings, repeat, and custom tables) |
+| `Alt + Shift + Drag` / Grip (`⠿`) drag | tmux pane | Drag to centre to swap panes (`swap-pane`); drag to edge to move (`move-pane`) |
 | `Super + T` / `Ctrl + Shift + T` | tmux tab | New tmux window (opens as a tab) |
 | `Super + W` / `Ctrl + Shift + W` | tmux tab | Close the active tmux pane (tab close button kills the window) |
 | `Super + D` / `Ctrl + Shift + D` | tmux pane | Split right |

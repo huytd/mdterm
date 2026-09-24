@@ -465,6 +465,9 @@ pub struct TerminalConfig {
     pub character_height: Option<f64>,
     #[serde(default)]
     pub renderer: Option<String>,
+    /// Passed through untouched to the JS tmux client.
+    #[serde(default)]
+    pub tmux: Option<serde_json::Value>,
 }
 
 pub fn apply_terminal_config(config: &TerminalConfig) {
@@ -712,6 +715,20 @@ extern "C" {
 
     #[wasm_bindgen(js_name = tmuxAttach, catch)]
     async fn tmux_attach_js(session: Option<String>, create: bool) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue>;
+}
+
+// tmux-client.js imports these two modules relatively; wasm-bindgen only copies
+// JS files that are referenced here, so reference each once to bundle it.
+#[wasm_bindgen(module = "/js/tmux-ui.js")]
+extern "C" {
+    #[wasm_bindgen(js_name = setPrefixBadge)]
+    fn _unused_tmux_ui();
+}
+
+#[wasm_bindgen(module = "/js/tmux-keys.js")]
+extern "C" {
+    #[wasm_bindgen(js_name = keyEventToTmux)]
+    fn _unused_tmux_keys();
 }
 
 /// Session ids of tabs that show a tmux window (`tmux-<conn>-<window>`).

@@ -82,6 +82,8 @@
     window.addEventListener('mdterm-tmux-exit', () => { window.__tmuxExited = true; });
     window.__openedFiles = [];
     window.addEventListener('mdterm-open-file', (e) => window.__openedFiles.push(e.detail));
+    window.__renamedWindows = [];
+    window.addEventListener('mdterm-tmux-window-renamed', (e) => window.__renamedWindows.push(e.detail));
 
     const conn = () => window.__mdtermTmux.connections.values().next().value;
 
@@ -124,6 +126,13 @@
       },
       focusPane(paneId) {
         conn().panes.get(paneId).term.focus();
+      },
+      paneGeometry() {
+        return this.panes().map(p => ({ id: p.id, rect: p.rect }));
+      },
+      hasSelection(paneId) {
+        const v = conn()?.panes.get(paneId);
+        return v && v.term ? v.term.hasSelection() : false;
       }
     };
     window.__harnessReady = true;

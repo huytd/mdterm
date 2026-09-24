@@ -57,6 +57,9 @@ pub struct TmuxConfig {
     /// Lines of history loaded into each pane on attach.
     #[serde(default)]
     pub scrollback: Option<u32>,
+    /// Emulate tmux prefix key and key bindings. Default: true.
+    #[serde(default, alias = "prefix-emulation", alias = "prefixEmulation")]
+    pub prefix_emulation: Option<bool>,
 }
 
 impl Default for TerminalConfig {
@@ -344,6 +347,7 @@ renderer: "dom"
 #   integration: "ask"
 #   session: ""        # empty = most recently used session
 #   scrollback: 2000   # history lines loaded per pane on attach
+#   prefix_emulation: true # emulate tmux prefix key and bindings
 "##;
 
 pub fn ensure_default_config_exists() -> Result<PathBuf, String> {
