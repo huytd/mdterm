@@ -908,6 +908,9 @@ html, body {
 }
 
 .terminal-container .xterm-viewport {
+  /* xterm.css paints the viewport #000 and it spans .xterm's padding box;
+     xterm 6 only applies the theme bg to the inner scrollable element. */
+  background-color: transparent;
   overflow-y: auto !important;
   scrollbar-width: thin;
   scrollbar-color: var(--border-color) transparent;
