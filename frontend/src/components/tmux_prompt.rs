@@ -73,8 +73,8 @@ pub fn TmuxPrompt(
                             >
                                 <div class="exp-icon">"›_"</div>
                                 <div class="exp-info">
-                                    <h4>"Plain shell"</h4>
-                                    <p>"Set tmux.integration in config.yml to \"auto\" or \"off\" to skip this prompt"</p>
+                                    <h4>"Keep current terminal"</h4>
+                                    <p>"Stay in this tab as-is (including a tmux your shell already started). Set tmux.integration to \"auto\" or \"off\" in config.yml to skip this prompt"</p>
                                 </div>
                             </button>
                         </div>
