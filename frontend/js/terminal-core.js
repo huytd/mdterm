@@ -236,6 +236,14 @@ function getUnicode11AddonCtor(opts) {
   return null;
 }
 
+// The launch-time tmux prompt is modal and owns the keyboard while mounted.
+// Terminals are created and re-focused asynchronously (tab setup, the delayed
+// focusThisTerm retries), so without this guard they pull focus back into
+// xterm's hidden textarea and keystrokes meant for the prompt reach the shell.
+function isTmuxPromptOpen() {
+  return typeof document !== 'undefined' && !!document.querySelector('.tmux-prompt');
+}
+
 function getTauriInvoke() {
   if (typeof window !== 'undefined') {
     if (window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function') {
@@ -716,10 +724,12 @@ export function installTerminalIntegration(term, container, ctx) {
   const focusThisTerm = () => {
     try {
       window._mdtermActiveSessionId = sId;
+      if (isTmuxPromptOpen()) return;
       const active = document.activeElement;
       const isEditorActive = active && (
         active.closest('.editor-pane') ||
         active.closest('.modal-content') ||
+        active.closest('.modal-dialog') ||
         active.tagName === 'INPUT' ||
         (active.tagName === 'TEXTAREA' && !active.classList.contains('xterm-helper-textarea')) ||
         active.getAttribute('contenteditable') === 'true'
@@ -1306,6 +1316,7 @@ export function focusTerminalSession(sessionId) {
   if (sId && typeof window !== 'undefined') {
     window._mdtermActiveSessionId = sId;
   }
+  if (isTmuxPromptOpen()) return;
   if (isTmuxSessionId(sId)) {
     focusTmuxWindow(sId);
     return;
